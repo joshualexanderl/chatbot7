@@ -1,9 +1,11 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { ImageIcon, ArrowUp } from "lucide-react";
+import { ImageIcon, ArrowUp, Check } from "lucide-react";
 import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
+import { getUserModelSettings, updateUserSelectedModel } from '@/app/actions';
+import { SettingsModal } from "./settings-modal";
 
 const placeholderPrompts = [
   "how can I implement a chatbot for my website?",
@@ -41,6 +43,44 @@ export function IdeInterfaceComponent() {
   // Add state for model dropdown
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
   const [modelDropdownPosition, setModelDropdownPosition] = useState({ top: 0, left: 0 });
+
+  // --- New State for Model Selection --- 
+  const [enabledModels, setEnabledModels] = useState<string[]>([]);
+  const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  const [isLoadingModels, setIsLoadingModels] = useState(true);
+  
+  // --- State for Settings Modal ---
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false); 
+
+  // --- Updated Fetch Logic (Moved and wrapped in useCallback) --- 
+  const loadModels = useCallback(async () => {
+    setIsLoadingModels(true);
+    try {
+      // Fetch the object containing both enabled and selected
+      const settings = await getUserModelSettings(); 
+      
+      // --- Simplified Logic --- 
+      setEnabledModels(settings.enabledModels);
+      setSelectedModel(settings.selectedModel);
+      
+    } catch (error) {
+      console.error("Failed to fetch user model settings:", error);
+      setEnabledModels([]); 
+      setSelectedModel(null); // Default to null on error
+    } finally {
+      setIsLoadingModels(false);
+    }
+  }, []);
+
+  // --- Initial Load Effect ---
+  useEffect(() => {
+    loadModels();
+  }, [loadModels]);
+
+  // --- Callback for when settings are changed in the modal ---
+  const handleSettingsChanged = useCallback(() => {
+     loadModels(); 
+  }, [loadModels]);
 
   // Animation function
   const animate = useCallback((timestamp: number) => {
@@ -106,7 +146,7 @@ export function IdeInterfaceComponent() {
     
     // Continue animation loop
     animationFrameRef.current = requestAnimationFrame(animate);
-  }, [currentPromptIndex, prompt]);
+  }, [currentPlaceholder, showTabButton]);
   
   // Start and clean up animation
   useEffect(() => {
@@ -199,6 +239,25 @@ export function IdeInterfaceComponent() {
     console.log("Prompt submitted:", prompt);
   };
 
+  // --- Updated Handler for selecting a model from dropdown --- 
+  const handleModelSelect = async (modelId: string) => { // Make async
+    // Optimistically update UI state
+    setSelectedModel(modelId);
+    setIsModelDropdownOpen(false); 
+
+    // Call server action to persist the selection
+    try {
+      const result = await updateUserSelectedModel(modelId);
+      if (!result.success) {
+        console.error("Failed to save selected model:", result.error);
+        // Optionally: Revert UI state or show an error message
+      }
+    } catch (error) {
+       console.error("Error calling updateUserSelectedModel:", error);
+       // Optionally: Revert UI state or show an error message
+    }
+  };
+
   return (
     <div className="h-full flex bg-white">
       <main className="flex-1 flex items-center justify-center">
@@ -244,11 +303,12 @@ export function IdeInterfaceComponent() {
               {/* Controls section */}
               <div className="border-t border-gray-200 px-4 py-2 flex items-center justify-between bg-white">
                 <div className="flex items-center gap-2">
-                  {/* Model selector button */}
+                  {/* --- Updated Model Selector Button --- */}
                   <div className="relative" ref={dropdownRef}>
                     <button 
-                      className="text-gray-500 flex items-center gap-1 text-sm hover:bg-gray-100 px-2 py-1 rounded-md transition-colors"
+                      className="text-gray-500 flex items-center gap-1 text-sm hover:bg-gray-100 px-2 py-1 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       onClick={(e) => {
+                        if (isLoadingModels) return; // Prevent opening while loading
                         const rect = e.currentTarget.getBoundingClientRect();
                         setModelDropdownPosition({
                           top: rect.top - 4,
@@ -256,14 +316,24 @@ export function IdeInterfaceComponent() {
                         });
                         setIsModelDropdownOpen(!isModelDropdownOpen);
                       }}
+                      disabled={isLoadingModels} // Disable while loading
                     >
-                      <span>Auto (best)</span>
+                      {/* --- Updated Button Text Logic --- */} 
+                      <span>
+                        {isLoadingModels 
+                          ? 'Loading...' 
+                          : selectedModel 
+                          ? selectedModel 
+                          : enabledModels.length > 0 
+                          ? 'Select Model' 
+                          : 'No Models Enabled'} 
+                      </span>
                       <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
                         <path d="M8 10L4 6H12L8 10Z" fill="#6B7280"/>
                       </svg>
                     </button>
                     
-                    {/* Model selection dropdown */}
+                    {/* --- Updated Model selection dropdown --- */}
                     {isModelDropdownOpen && typeof document !== 'undefined' && createPortal(
                       <div 
                         className="fixed bg-white rounded-md shadow-lg border border-gray-200 w-56 z-50"
@@ -274,18 +344,27 @@ export function IdeInterfaceComponent() {
                         }}
                       >
                         <div className="p-1.5">
-                          <div className="flex items-center justify-between px-3 py-2 bg-gray-50 rounded-md">
-                            <span className="text-gray-800 text-sm">Auto (best)</span>
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                              <path d="M5 12L10 17L19 8" stroke="#000000" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                            </svg>
-                          </div>
-                          <div className="px-3 py-2 hover:bg-gray-50 cursor-pointer">
-                            <span className="text-gray-800 text-sm">Claude 3.7 Sonnet</span>
-                          </div>
-                          <div className="px-3 py-2 hover:bg-gray-50 cursor-pointer">
-                            <span className="text-gray-800 text-sm">GPT-4.1 (free)</span>
-                          </div>
+                          {/* Dynamically generated enabled models */}
+                          {enabledModels.map((modelId) => (
+                            <div 
+                              key={modelId}
+                              className="flex items-center justify-between px-3 py-2 hover:bg-gray-50 cursor-pointer rounded-md"
+                              onClick={() => handleModelSelect(modelId)}
+                            >
+                              <span className="text-gray-800 text-sm">{modelId}</span>
+                              {selectedModel === modelId && (
+                                 <Check className="h-4 w-4 text-black" strokeWidth={2} />
+                              )}
+                            </div>
+                          ))}
+
+                          {/* Show message if no models are enabled */}
+                          {enabledModels.length === 0 && !isLoadingModels && (
+                            <div className="px-3 py-2 text-sm text-gray-500 text-center">
+                              No models enabled. Go to Settings &gt; Models.
+                            </div>
+                          )}
+                          
                         </div>
                       </div>,
                       document.body
@@ -394,6 +473,13 @@ export function IdeInterfaceComponent() {
           </section>
         </div>
       </main>
+      
+      {/* Add SettingsModal instance */}
+      <SettingsModal 
+         isOpen={isSettingsModalOpen} 
+         setIsOpen={setIsSettingsModalOpen} 
+         onSettingsChanged={handleSettingsChanged} 
+       />
     </div>
   );
 } 

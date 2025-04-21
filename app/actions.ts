@@ -248,3 +248,188 @@ export async function reactivateSubscriptionAction(subscriptionId: string): Prom
     return { success: false, error: errorMessage };
   }
 }
+
+// --- Model Settings Types --- 
+// Keep interface exported
+export interface UserModelSettings {
+  enabledModels: string[];
+  selectedModel: string | null;
+}
+
+// Default settings constant - REMOVE export
+const defaultModelSettings: UserModelSettings = {
+  enabledModels: ['claude-3.5-sonnet', 'claude-3.7-sonnet', 'claude-3.7-sonnet-max'],
+  selectedModel: 'claude-3.5-sonnet' 
+};
+
+/**
+ * Fetches the user's model settings (enabled models and last selected model).
+ * Returns default settings if no user or profile found, or if columns are null.
+ */
+export async function getUserModelSettings(): Promise<UserModelSettings> {
+  const supabase = await createSupabaseClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) {
+    // console.warn("getUserModelSettings: No user found."); // Keep warn?
+    return defaultModelSettings; 
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('enabled_models, selected_model') 
+      .eq('id', user.id)
+      .single(); 
+
+    // console.log("[ACTION LOG] Raw data fetched from DB:", data); // Removed log
+
+    if (error) {
+      if (error.code === 'PGRST116') { 
+        // console.warn(`getUserModelSettings: Profile not found for user ${user.id}. Returning default.`); // Keep warn?
+        // console.log("[ACTION LOG] Returning default models (profile not found - PGRST116):", defaultModelSettings); // Removed log
+        return defaultModelSettings;
+      }
+      console.error("Error fetching user model settings:", error);
+      throw error; 
+    }
+
+    // Process the fetched data, providing defaults if columns are null
+    const settings: UserModelSettings = {
+        enabledModels: data?.enabled_models ?? defaultModelSettings.enabledModels,
+        selectedModel: data?.selected_model ?? null 
+    };
+
+    // Validate if the saved selected model is actually enabled
+    if (settings.selectedModel && !settings.enabledModels.includes(settings.selectedModel)) {
+        // console.log(`[ACTION LOG] Saved selected model '${settings.selectedModel}' is not in enabled list. Resetting selection.`); // Removed log
+        if (defaultModelSettings.selectedModel && settings.enabledModels.includes(defaultModelSettings.selectedModel)) {
+             settings.selectedModel = defaultModelSettings.selectedModel;
+        } else if (settings.enabledModels.length > 0) {
+            settings.selectedModel = settings.enabledModels[0];
+        } else {
+            settings.selectedModel = null;
+        }
+    } else if (!settings.selectedModel && settings.enabledModels.length > 0) {
+        if (defaultModelSettings.selectedModel && settings.enabledModels.includes(defaultModelSettings.selectedModel)) {
+             settings.selectedModel = defaultModelSettings.selectedModel;
+        } else {
+            settings.selectedModel = settings.enabledModels[0];
+        }
+    }
+
+    // console.log("[ACTION LOG] Returning processed user settings:", settings); // Removed log
+    return settings;
+
+  } catch (err) {
+    console.error("Unexpected error in getUserModelSettings:", err);
+    // console.log("[ACTION LOG] Returning default models (due to catch block):", defaultModelSettings); // Removed log
+    return defaultModelSettings;
+  }
+}
+
+// Server Action to update the list of enabled models
+// --- MODIFIED --- Now also handles updating selected_model if it becomes disabled
+export async function updateUserModelSettings(enabledIds: string[]): Promise<{ success: boolean; error?: string }> {
+  try {
+    const supabase = await createSupabaseClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      console.error("User not authenticated:", authError);
+      return { success: false, error: "User not authenticated." };
+    }
+
+    // 1. Get the current selected model BEFORE updating from the CORRECT table
+    const { data: currentSettings, error: fetchError } = await supabase
+      .from('profiles') 
+      .select('selected_model')
+      .eq('id', user.id) 
+      .single();
+
+    if (fetchError && fetchError.code !== 'PGRST116') { 
+       console.error("Error fetching current settings from profiles:", fetchError);
+       return { success: false, error: "Failed to fetch current settings." };
+    }
+
+    const currentSelectedModel = currentSettings?.selected_model;
+    let newSelectedModel = currentSelectedModel; 
+
+    // 2. Check if the current selected model is being disabled
+    if (currentSelectedModel && !enabledIds.includes(currentSelectedModel)) {
+      // console.log(`Selected model '${currentSelectedModel}' is being disabled.`); // Removed log
+      // 3. Determine the new selected model (first enabled or null)
+      newSelectedModel = enabledIds.length > 0 ? enabledIds[0] : null;
+      // console.log(`Automatically setting new selected model to: '${newSelectedModel}'`); // Removed log
+    } else {
+      // Ensure selected model is valid even if not changed (e.g., on first save or if current was null)
+      if (currentSelectedModel && !enabledIds.includes(currentSelectedModel)) {
+         newSelectedModel = enabledIds.length > 0 ? enabledIds[0] : null;
+      } else if (!currentSelectedModel && enabledIds.length > 0) {
+         newSelectedModel = enabledIds[0];
+      }
+    }
+
+    // 4. Update BOTH enabled_models and selected_model in the CORRECT table
+    const { error: updateError } = await supabase
+      .from('profiles') 
+      .update({ 
+        enabled_models: enabledIds,
+        selected_model: newSelectedModel, 
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', user.id); 
+
+    if (updateError) {
+      console.error("Error updating user settings in profiles:", updateError);
+      return { success: false, error: "Failed to update model settings." };
+    }
+
+    revalidatePath("/"); 
+
+    return { success: true };
+
+  } catch (err: unknown) {
+    console.error("Unexpected error in updateUserModelSettings:", err);
+    const errorMessage = err instanceof Error ? err.message : "An unexpected error occurred.";
+    return { success: false, error: errorMessage };
+  }
+}
+
+// Server Action to update ONLY the selected model (used by dropdown)
+// --- CORRECTED --- Use 'profiles' table and 'id' column
+export async function updateUserSelectedModel(modelId: string | null): Promise<{ success: boolean; error?: string }> {
+  try {
+    const supabase = await createSupabaseClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      console.error("User not authenticated:", authError);
+      return { success: false, error: "User not authenticated." };
+    }
+
+    const { error: updateError } = await supabase
+      .from('profiles') 
+      .update({ 
+        selected_model: modelId,
+        updated_at: new Date().toISOString(),
+      })
+       .eq('id', user.id); 
+
+    if (updateError) {
+      console.error("Error updating selected model in profiles:", updateError);
+      return { success: false, error: "Failed to update selected model." };
+    }
+
+    revalidatePath("/");
+
+    return { success: true };
+
+  } catch (err: unknown) {
+    console.error("Unexpected error in updateUserSelectedModel:", err);
+    const errorMessage = err instanceof Error ? err.message : "An unexpected error occurred.";
+    return { success: false, error: errorMessage };
+  }
+}
+
+// --- End Model Settings Actions --- 

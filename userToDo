@@ -1,0 +1,39 @@
+RUN
+
+-- 1. Create the profiles table linked to auth.users
+create table public.profiles (
+  id uuid references auth.users on delete cascade not null primary key,
+  updated_at timestamp with time zone,
+  -- Add other profile fields you might want later (optional)
+  username text unique,
+  full_name text,
+  avatar_url text,
+  website text,
+  
+  constraint username_length check (char_length(username) >= 3)
+);
+
+-- 2. Set up Row Level Security (RLS) - IMPORTANT for security
+--    Make sure you understand RLS policies before deploying to production.
+alter table public.profiles enable row level security; 
+
+-- 3. RLS Policies for profiles:
+--    - Allow public read access
+create policy "Public profiles are viewable by everyone." on public.profiles
+  for select using (true);
+
+--    - Allow users to insert their own profile
+create policy "Users can insert their own profile." on public.profiles
+  for insert with check (auth.uid() = id);
+
+--    - Allow users to update their own profile
+create policy "Users can update own profile." on public.profiles
+  for update using (auth.uid() = id);
+
+-- 4. Add the column to store enabled models
+alter table public.profiles
+  add column enabled_models text[] default '{}'; -- Default to empty array
+
+
+alter table public.profiles
+    add column selected_model text; 

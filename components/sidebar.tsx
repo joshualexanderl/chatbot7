@@ -120,6 +120,12 @@ export function SidebarComponent({ className, onToggleCollapse, collapsed = fals
     </a>
   );
 
+  // --- Define the callback for settings changes --- 
+  const handleSettingsChanged = () => {
+    console.log("[Sidebar] Settings changed, refreshing router...");
+    router.refresh();
+  };
+
   return (
     <div
       className={cn(
@@ -205,11 +211,6 @@ export function SidebarComponent({ className, onToggleCollapse, collapsed = fals
                    <Button variant="ghost" className="justify-start w-full text-stone-700 hover:bg-stone-200 text-sm px-1.5">
                      <div className="flex items-center gap-2 w-full text-left">
                        <span>⌨️</span> <span>Terminal</span>
-                     </div>
-                   </Button>
-                   <Button variant="ghost" className="justify-start w-full text-stone-700 hover:bg-stone-200 text-sm px-1.5">
-                     <div className="flex items-center gap-2 w-full text-left">
-                       <span>🧩</span> <span>Extensions</span>
                      </div>
                    </Button>
                 </div>
@@ -344,7 +345,10 @@ export function SidebarComponent({ className, onToggleCollapse, collapsed = fals
                  >
                    <button 
                      className="w-full px-4 py-2 text-left flex items-center gap-2 hover:bg-stone-100 text-stone-700"
-                     onClick={() => setIsSettingsModalOpen(true)}
+                     onClick={() => {
+                       setIsSettingsModalOpen(true);
+                       setShowProfileMenu(false); // Close profile menu when opening modal
+                     }}
                    >
                      <Settings className="h-4 w-4" />
                      <span>Settings</span>
@@ -363,7 +367,11 @@ export function SidebarComponent({ className, onToggleCollapse, collapsed = fals
            </div>
         </>
       )}
-      <SettingsModal isOpen={isSettingsModalOpen} setIsOpen={setIsSettingsModalOpen} />
+      <SettingsModal 
+        isOpen={isSettingsModalOpen} 
+        setIsOpen={setIsSettingsModalOpen} 
+        onSettingsChanged={handleSettingsChanged} 
+      />
     </div>
   );
 } 
