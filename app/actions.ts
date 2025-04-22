@@ -5,6 +5,9 @@ import { redirect } from "next/navigation";
 import { encodedRedirect } from "@/utils/redirect";
 import { revalidatePath } from "next/cache";
 import { createUpdateClient } from "@/utils/update/server";
+import Anthropic from '@anthropic-ai/sdk';
+// Assuming MessageParam might not be found by linter yet
+// import { MessageParam } from '@anthropic-ai/sdk/resources/messages'; 
 
 export const signInAction = async (formData: FormData) => {
   const email = formData.get("email") as string;
@@ -258,8 +261,8 @@ export interface UserModelSettings {
 
 // Default settings constant - REMOVE export
 const defaultModelSettings: UserModelSettings = {
-  enabledModels: ['claude-3.5-sonnet', 'claude-3.7-sonnet', 'claude-3.7-sonnet-max'],
-  selectedModel: 'claude-3.5-sonnet' 
+  enabledModels: ['claude-3-5-sonnet-20240620', 'claude-3-haiku-20240307'],
+  selectedModel: 'claude-3-5-sonnet-20240620' 
 };
 
 /**
@@ -428,6 +431,98 @@ export async function updateUserSelectedModel(modelId: string | null): Promise<{
   } catch (err: unknown) {
     console.error("Unexpected error in updateUserSelectedModel:", err);
     const errorMessage = err instanceof Error ? err.message : "An unexpected error occurred.";
+    return { success: false, error: errorMessage };
+  }
+}
+
+// Message type used by the chat interface (can be shared or redefined)
+// Ensure this matches the structure expected by the server action
+interface ClientMessage {
+  id: string;
+  sender: 'user' | 'ai';
+  content: string;
+}
+
+// --- Server Action for Anthropic API Call ---
+export async function getAnthropicResponse(
+  messages: ClientMessage[], 
+  model: string
+): Promise<{ success: boolean; response?: string; error?: string }> {
+  
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+
+  if (!apiKey) {
+    console.error("ANTHROPIC_API_KEY is not set in environment variables.");
+    return { success: false, error: "Server configuration error: API key missing." };
+  }
+
+  if (!model) {
+     return { success: false, error: "No model selected." };
+  }
+
+  const anthropic = new Anthropic({ apiKey });
+
+  // Convert client messages, assume MessageParam structure
+  const formattedMessages: Anthropic.MessageParam[] = messages.map(msg => ({
+    role: msg.sender === 'user' ? 'user' : 'assistant',
+    content: msg.content
+  }));
+
+  if (formattedMessages.length === 0) {
+     return { success: false, error: "No messages to send." };
+  }
+
+  try {
+    console.log(`Calling Anthropic API with model: ${model}`);
+    const response = await anthropic.messages.create({
+      model: model, 
+      max_tokens: 1024, 
+      messages: formattedMessages,
+    });
+
+    console.log("Anthropic API Response Status:", response.stop_reason);
+
+    // Define a minimal type for the content block for filtering/mapping
+    // Or ideally use Anthropic.ContentBlock from SDK if available
+    type ContentBlock = { type: string; text?: string }; 
+
+    // Filter first to get an array containing only valid text blocks
+    const textBlocks = response.content
+      .filter((block: ContentBlock): block is { type: 'text'; text: string } => 
+        block.type === 'text' && typeof block.text === 'string'
+      );
+      
+    // Now map over the filtered blocks, explicitly casting if necessary
+    const aiTextResponse = textBlocks
+      .map((textBlock) => (textBlock as { text: string }).text) // Explicit cast
+      .join('\n');
+
+    if (!aiTextResponse && response.content.length > 0 && textBlocks.length === 0) {
+       // Handle cases where response has content, but none is usable text (e.g., tool use only)
+       console.warn("Anthropic response contained no usable text content.", response.content);
+       // Decide on appropriate error or empty response
+       return { success: true, response: "" }; // Or return an error message
+    }
+
+    if (!aiTextResponse && response.content.length === 0) {
+        // Handle cases where the response content array was truly empty
+        console.warn("Anthropic API response was empty.", response);
+        return { success: false, error: "Received an empty response from AI." };
+    }
+
+    return { success: true, response: aiTextResponse };
+
+  } catch (error: unknown) {
+    console.error("Error calling Anthropic API:", error);
+    let errorMessage = "An unexpected error occurred while contacting the AI.";
+
+    // Revert to standard instanceof checks - should work as type guards
+    if (error instanceof Anthropic.APIError) {
+        errorMessage = `Anthropic API Error (${error.status}): ${error.message}`; 
+    } else if (error instanceof Error) { 
+        errorMessage = error.message;
+    }
+
     return { success: false, error: errorMessage };
   }
 }

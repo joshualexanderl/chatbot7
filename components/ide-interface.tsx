@@ -6,6 +6,24 @@ import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
 import { getUserModelSettings, updateUserSelectedModel } from '@/app/actions';
 import { SettingsModal } from "./settings-modal";
+import { useRouter } from 'next/navigation';
+import { v4 as uuidv4 } from 'uuid';
+
+// Define available models with display names within this component
+// TODO: Centralize this definition later if needed
+const availableModelsForDisplay = [
+  { id: 'claude-3-opus-20240229', displayName: 'Claude 3 Opus' }, 
+  { id: 'claude-3-5-sonnet-20240620', displayName: 'Claude 3.5 Sonnet' },
+  { id: 'claude-3-haiku-20240307', displayName: 'Claude 3 Haiku' },
+  // Add others matching the settings modal
+];
+
+// Helper to find display name from ID
+const getDisplayName = (id: string | null): string | null => {
+  if (!id) return null;
+  const model = availableModelsForDisplay.find(m => m.id === id);
+  return model ? model.displayName : id; // Fallback to ID if not found
+};
 
 const placeholderPrompts = [
   "how can I implement a chatbot for my website?",
@@ -17,6 +35,7 @@ const placeholderPrompts = [
 ];
 
 export function IdeInterfaceComponent() {
+  const router = useRouter();
   const [prompt, setPrompt] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -84,69 +103,71 @@ export function IdeInterfaceComponent() {
 
   // Animation function
   const animate = useCallback((timestamp: number) => {
-    if (!lastTimeRef.current) lastTimeRef.current = timestamp;
-    
-    const deltaTime = timestamp - lastTimeRef.current;
-    const currentPrompt = placeholderPrompts[currentPromptIndex];
-    
-    // Handle pausing
-    if (pauseUntilRef.current > timestamp) {
-      // Only show tab button during pause if input is empty and we're not actively typing
-      if (!isTypingRef.current && charIndexRef.current === currentPrompt.length && !prompt) {
-        setShowTabButton(true);
+    if (!isModelDropdownOpen) { // Only animate if chat is NOT active
+      if (!lastTimeRef.current) lastTimeRef.current = timestamp;
+      
+      const deltaTime = timestamp - lastTimeRef.current;
+      const currentPromptText = placeholderPrompts[currentPromptIndex];
+      
+      // Handle pausing
+      if (pauseUntilRef.current > timestamp) {
+        // Only show tab button during pause if input is empty and we're not actively typing
+        if (!isTypingRef.current && charIndexRef.current === currentPromptText.length && !prompt) {
+          setShowTabButton(true);
+        } else {
+          setShowTabButton(false);
+        }
+        animationFrameRef.current = requestAnimationFrame(animate);
+        return;
+      }
+      
+      // Hide tab button when not paused
+      setShowTabButton(false);
+      
+      // Determine if we should update this frame
+      let shouldUpdate = false;
+      
+      if (isTypingRef.current) {
+        // When typing
+        if (deltaTime >= ANIMATION_SPEED) {
+          shouldUpdate = true;
+          lastTimeRef.current = timestamp;
+          
+          if (charIndexRef.current >= currentPromptText.length) {
+            // Done typing, pause before deleting
+            isTypingRef.current = false;
+            pauseUntilRef.current = timestamp + PAUSE_AFTER_TYPE;
+          } else {
+            // Continue typing
+            charIndexRef.current++;
+          }
+        }
       } else {
-        setShowTabButton(false);
+        // When deleting
+        if (deltaTime >= ANIMATION_SPEED) {
+          shouldUpdate = true;
+          lastTimeRef.current = timestamp;
+          
+          if (charIndexRef.current <= 0) {
+            // Done deleting, switch to next prompt immediately
+            isTypingRef.current = true;
+            setCurrentPromptIndex((prev) => (prev + 1) % placeholderPrompts.length);
+          } else {
+            // Continue deleting
+            charIndexRef.current--;
+          }
+        }
       }
+      
+      // Update placeholder text if needed
+      if (shouldUpdate) {
+        setCurrentPlaceholder(currentPromptText.substring(0, charIndexRef.current));
+      }
+      
+      // Continue animation loop
       animationFrameRef.current = requestAnimationFrame(animate);
-      return;
     }
-    
-    // Hide tab button when not paused
-    setShowTabButton(false);
-    
-    // Determine if we should update this frame
-    let shouldUpdate = false;
-    
-    if (isTypingRef.current) {
-      // When typing
-      if (deltaTime >= ANIMATION_SPEED) {
-        shouldUpdate = true;
-        lastTimeRef.current = timestamp;
-        
-        if (charIndexRef.current >= currentPrompt.length) {
-          // Done typing, pause before deleting
-          isTypingRef.current = false;
-          pauseUntilRef.current = timestamp + PAUSE_AFTER_TYPE;
-        } else {
-          // Continue typing
-          charIndexRef.current++;
-        }
-      }
-    } else {
-      // When deleting
-      if (deltaTime >= ANIMATION_SPEED) {
-        shouldUpdate = true;
-        lastTimeRef.current = timestamp;
-        
-        if (charIndexRef.current <= 0) {
-          // Done deleting, switch to next prompt immediately
-          isTypingRef.current = true;
-          setCurrentPromptIndex((prev) => (prev + 1) % placeholderPrompts.length);
-        } else {
-          // Continue deleting
-          charIndexRef.current--;
-        }
-      }
-    }
-    
-    // Update placeholder text if needed
-    if (shouldUpdate) {
-      setCurrentPlaceholder(currentPrompt.substring(0, charIndexRef.current));
-    }
-    
-    // Continue animation loop
-    animationFrameRef.current = requestAnimationFrame(animate);
-  }, [currentPlaceholder, showTabButton]);
+  }, [currentPlaceholder, showTabButton, prompt, isModelDropdownOpen, currentPromptIndex]);
   
   // Start and clean up animation
   useEffect(() => {
@@ -192,26 +213,35 @@ export function IdeInterfaceComponent() {
     }
   }, [isModelDropdownOpen]);
 
-  // Handle tab key press
-  const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    if (e.key === 'Tab' && showTabButton) {
+  // --- Corrected handleKeyDown and useEffect ---
+  const handleKeyDown = useCallback((e: KeyboardEvent) => { // Use generic KeyboardEvent for document listener
+    if (e.key === 'Tab' && showTabButton && !isModelDropdownOpen) { 
       e.preventDefault();
       setPrompt(currentPlaceholder);
       setShowTabButton(false);
-      // Reset the animation state to start fresh with next prompt
       isTypingRef.current = true;
       charIndexRef.current = 0;
       setCurrentPromptIndex((prev) => (prev + 1) % placeholderPrompts.length);
     }
-  }, [currentPlaceholder, showTabButton]);
+    // Enter key check is handled by the textarea's onKeyDown prop directly now
+  }, [currentPlaceholder, showTabButton, isModelDropdownOpen]); 
 
-  // Add keyboard listener
   useEffect(() => {
+    // Listener for Tab completion (on document)
     document.addEventListener('keydown', handleKeyDown);
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, [handleKeyDown]);
+
+  // Specific handler for Textarea Enter key
+  const handleTextareaKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey && prompt.trim()) {
+        e.preventDefault(); 
+        handleSubmit();
+    }
+    // Allow other keys (like Shift+Enter) to function normally
+  };
 
   const handleImageUpload = () => {
     if (fileInputRef.current) {
@@ -230,39 +260,38 @@ export function IdeInterfaceComponent() {
 
   const handlePromptChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setPrompt(e.target.value);
-    // Hide tab button when user starts typing
-    setShowTabButton(false);
+    setShowTabButton(false); 
   };
 
   const handleSubmit = () => {
-    // Handle form submission
-    console.log("Prompt submitted:", prompt);
+    const currentPrompt = prompt.trim();
+    if (!currentPrompt) return;
+    const newChatId = uuidv4();
+
+    // Encode the prompt for safe inclusion in the URL
+    const encodedPrompt = encodeURIComponent(currentPrompt);
+
+    // Navigate to the new chat page with the prompt as a query parameter
+    router.push(`/c/${newChatId}?prompt=${encodedPrompt}`);
+
+    // Note: We no longer need to manage chat state here
   };
 
   // --- Updated Handler for selecting a model from dropdown --- 
-  const handleModelSelect = async (modelId: string) => { // Make async
-    // Optimistically update UI state
+  const handleModelSelect = async (modelId: string) => {
     setSelectedModel(modelId);
     setIsModelDropdownOpen(false); 
-
-    // Call server action to persist the selection
     try {
-      const result = await updateUserSelectedModel(modelId);
-      if (!result.success) {
-        console.error("Failed to save selected model:", result.error);
-        // Optionally: Revert UI state or show an error message
-      }
+      await updateUserSelectedModel(modelId); // Sends ID to backend
     } catch (error) {
        console.error("Error calling updateUserSelectedModel:", error);
-       // Optionally: Revert UI state or show an error message
     }
   };
 
   return (
-    <div className="h-full flex bg-white">
+    <div className="h-full flex flex-col bg-white">
       <main className="flex-1 flex items-center justify-center">
         <div className="w-full max-w-3xl mx-auto px-6">
-
           <section className="flex flex-col items-center">
             <h1 
               className="text-center font-serif font-medium mb-4 text-[clamp(42px,5vw,62px)] leading-[1.1] text-gray-900"
@@ -273,67 +302,49 @@ export function IdeInterfaceComponent() {
               Start with our template and customize to fit your needs
             </p>
           </section>
-
-          {/* Input area */}
-          <div className="w-full mx-auto relative max-w-[710px] rounded-2xl border border-gray-200 bg-[#f3f4f6] overflow-hidden mb-12">
+          <div className="w-full mx-auto relative max-w-[710px] rounded-2xl border border-gray-200 bg-[#f3f4f6] overflow-hidden mb-12 shadow-sm">
             <div className="flex flex-col">
-              {/* Text input section */}
               <div className="w-full relative">
                 <textarea
                   ref={textareaRef}
-                  className="w-full resize-none text-base focus:outline-none text-stone-900 placeholder:text-stone-900 bg-transparent px-5 py-3 min-h-[48px] max-h-[360px]"
-                  placeholder={currentPlaceholder}
+                  className="w-full resize-none text-base focus:outline-none text-stone-900 placeholder:text-gray-500 bg-transparent px-5 py-3 min-h-[48px] max-h-[360px] pr-10"
+                  placeholder={currentPlaceholder || "Ask anything..."}
                   value={prompt}
                   onChange={handlePromptChange}
+                  onKeyDown={handleTextareaKeyDown}
                   rows={1}
                 />
                 {showTabButton && (
                   <button
                     className="absolute right-3 top-1/2 -translate-y-1/2 px-1.5 py-0.5 text-[10px] bg-gray-400/20 text-gray-500 rounded hover:bg-gray-400/30 transition-colors"
-                    onClick={() => {
-                      setPrompt(currentPlaceholder);
-                      setShowTabButton(false);
-                    }}
+                    onClick={() => { setPrompt(currentPlaceholder); setShowTabButton(false); }}
                   >
                     tab
                   </button>
                 )}
               </div>
 
-              {/* Controls section */}
               <div className="border-t border-gray-200 px-4 py-2 flex items-center justify-between bg-white">
                 <div className="flex items-center gap-2">
-                  {/* --- Updated Model Selector Button --- */}
                   <div className="relative" ref={dropdownRef}>
                     <button 
                       className="text-gray-500 flex items-center gap-1 text-sm hover:bg-gray-100 px-2 py-1 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       onClick={(e) => {
-                        if (isLoadingModels) return; // Prevent opening while loading
+                        if (isLoadingModels) return;
                         const rect = e.currentTarget.getBoundingClientRect();
-                        setModelDropdownPosition({
-                          top: rect.top - 4,
-                          left: rect.left
-                        });
+                        setModelDropdownPosition({ top: rect.top - 4, left: rect.left });
                         setIsModelDropdownOpen(!isModelDropdownOpen);
                       }}
-                      disabled={isLoadingModels} // Disable while loading
+                      disabled={isLoadingModels}
                     >
-                      {/* --- Updated Button Text Logic --- */} 
                       <span>
-                        {isLoadingModels 
-                          ? 'Loading...' 
-                          : selectedModel 
-                          ? selectedModel 
-                          : enabledModels.length > 0 
-                          ? 'Select Model' 
-                          : 'No Models Enabled'} 
+                        {isLoadingModels ? 'Loading...' : getDisplayName(selectedModel) ? getDisplayName(selectedModel) : enabledModels.length > 0 ? 'Select Model' : 'No Models Enabled'} 
                       </span>
                       <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
                         <path d="M8 10L4 6H12L8 10Z" fill="#6B7280"/>
                       </svg>
                     </button>
                     
-                    {/* --- Updated Model selection dropdown --- */}
                     {isModelDropdownOpen && typeof document !== 'undefined' && createPortal(
                       <div 
                         className="fixed bg-white rounded-md shadow-lg border border-gray-200 w-56 z-50"
@@ -344,21 +355,22 @@ export function IdeInterfaceComponent() {
                         }}
                       >
                         <div className="p-1.5">
-                          {/* Dynamically generated enabled models */}
-                          {enabledModels.map((modelId) => (
-                            <div 
-                              key={modelId}
-                              className="flex items-center justify-between px-3 py-2 hover:bg-gray-50 cursor-pointer rounded-md"
-                              onClick={() => handleModelSelect(modelId)}
-                            >
-                              <span className="text-gray-800 text-sm">{modelId}</span>
-                              {selectedModel === modelId && (
-                                 <Check className="h-4 w-4 text-black" strokeWidth={2} />
-                              )}
-                            </div>
-                          ))}
+                          {enabledModels.map((modelId) => {
+                            const displayName = getDisplayName(modelId);
+                            return (
+                              <div 
+                                key={modelId}
+                                className="flex items-center justify-between px-3 py-2 hover:bg-gray-50 cursor-pointer rounded-md"
+                                onClick={() => handleModelSelect(modelId)}
+                              >
+                                <span className="text-gray-800 text-sm">{displayName}</span>
+                                {selectedModel === modelId && (
+                                   <Check className="h-4 w-4 text-black" strokeWidth={2} />
+                                )}
+                              </div>
+                            );
+                          })}
 
-                          {/* Show message if no models are enabled */}
                           {enabledModels.length === 0 && !isLoadingModels && (
                             <div className="px-3 py-2 text-sm text-gray-500 text-center">
                               No models enabled. Go to Settings &gt; Models.
@@ -371,37 +383,28 @@ export function IdeInterfaceComponent() {
                     )}
                   </div>
 
-                  {/* Image upload button */}
                   <button 
                     className="text-gray-500 relative group hover:bg-gray-100 p-1.5 rounded-md transition-colors" 
-                    aria-label="Upload image"
+                    aria-label="Upload image" 
                     onClick={handleImageUpload}
                   >
                     <ImageIcon className="h-5 w-5" />
-                    <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-1.5 bg-black text-white text-sm rounded-md opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap">
-                      Attach images & files
-                    </div>
                     <input 
-                      type="file"
-                      ref={fileInputRef}
-                      className="hidden"
-                      accept="image/png,image/jpeg"
+                      type="file" 
+                      ref={fileInputRef} 
+                      className="hidden" 
+                      accept="image/png,image/jpeg" 
                       onChange={handleImageChange}
                     />
                   </button>
                 </div>
-
-                {/* Submit button */}
                 <button 
-                  className={`flex items-center justify-center h-8 w-8 rounded-full border transition-colors ${
-                    prompt.trim() 
-                      ? "bg-black border-black hover:bg-gray-800" 
-                      : "bg-white border-gray-200 hover:bg-gray-100"
-                  }`}
+                  className={`flex items-center justify-center h-8 w-8 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${prompt.trim() ? "bg-black text-white hover:bg-gray-800" : "bg-white text-gray-400 border border-gray-300"}`}
                   aria-label="Submit prompt"
                   onClick={handleSubmit}
+                  disabled={!prompt.trim()} 
                 >
-                  <ArrowUp className={`h-4 w-4 ${prompt.trim() ? "text-white" : "text-gray-600"}`} />
+                   <ArrowUp className="h-4 w-4" />
                 </button>
               </div>
             </div>
@@ -474,7 +477,6 @@ export function IdeInterfaceComponent() {
         </div>
       </main>
       
-      {/* Add SettingsModal instance */}
       <SettingsModal 
          isOpen={isSettingsModalOpen} 
          setIsOpen={setIsSettingsModalOpen} 

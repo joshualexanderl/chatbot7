@@ -36,18 +36,19 @@ interface SubscriptionDetailsState {
 
 // Model Settings Interface
 interface ModelSetting {
-  id: string;
-  name: string;
+  id: string; // Technical ID for API
+  name: string; // Keep name if used elsewhere, or make it the display name
+  displayName: string; // User-friendly name
   enabled: boolean;
 }
 
-// Define the available models - used to map fetched settings
+// Define the available models with display names
 const availableClaudeModels: Omit<ModelSetting, 'enabled'>[] = [
-  { id: 'claude-3-opus', name: 'claude-3-opus' },
-  { id: 'claude-3.5-haiku', name: 'claude-3.5-haiku' },
-  { id: 'claude-3.5-sonnet', name: 'claude-3.5-sonnet' },
-  { id: 'claude-3.7-sonnet', name: 'claude-3.7-sonnet' },
-  { id: 'claude-3.7-sonnet-max', name: 'claude-3.7-sonnet-max' },
+  { id: 'claude-3-opus-20240229', name: 'claude-3-opus-20240229', displayName: 'Claude 3 Opus' }, 
+  { id: 'claude-3-5-sonnet-20240620', name: 'claude-3-5-sonnet-20240620', displayName: 'Claude 3.5 Sonnet' },
+  { id: 'claude-3-haiku-20240307', name: 'claude-3-haiku-20240307', displayName: 'Claude 3 Haiku' },
+  // Add other valid models as needed, remove invalid ones like 'claude-3.7-sonnet'
+  // { id: 'claude-3-sonnet-20240229', name: 'claude-3-sonnet-20240229' }, 
 ];
 
 // Helper function to capitalize first letter
@@ -416,16 +417,16 @@ export function SettingsModal({ isOpen, setIsOpen, onSettingsChanged }: Settings
                 id={model.id}
                 checked={model.enabled}
                 onCheckedChange={(checked: boolean | 'indeterminate') => handleCheckedChange(model.id, checked)}
-                disabled={isSavingModels} // Disable while saving
+                disabled={isSavingModels}
               />
               <Label 
                  htmlFor={model.id} 
                  className={cn(
                    "text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70",
-                   isSavingModels && "opacity-50" // Dim label while saving
+                   isSavingModels && "opacity-50"
                  )}
               >
-                {model.name}
+                {model.displayName}
               </Label>
             </div>
           ))}

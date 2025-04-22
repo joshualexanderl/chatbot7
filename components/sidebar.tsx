@@ -162,6 +162,7 @@ export function SidebarComponent({ className, onToggleCollapse, collapsed = fals
             <Button
               variant="ghost"
               className="w-full text-stone-700 hover:bg-stone-200 px-1.5"
+              onClick={() => router.push('/')}
             >
               <div className="flex items-center gap-2 w-full">
                 <Plus className="h-4 w-4" />
