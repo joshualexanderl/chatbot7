@@ -44,8 +44,10 @@ interface ModelSetting {
 
 // Define the available models with display names
 const availableClaudeModels: Omit<ModelSetting, 'enabled'>[] = [
+  { id: 'claude-3-7-sonnet-20250219', name: 'claude-3-7-sonnet-20250219', displayName: 'Claude 3.7 Sonnet' },
   { id: 'claude-3-opus-20240229', name: 'claude-3-opus-20240229', displayName: 'Claude 3 Opus' }, 
   { id: 'claude-3-5-sonnet-20240620', name: 'claude-3-5-sonnet-20240620', displayName: 'Claude 3.5 Sonnet' },
+  { id: 'claude-3-sonnet-20240229', name: 'claude-3-sonnet-20240229', displayName: 'Claude 3 Sonnet' },
   { id: 'claude-3-haiku-20240307', name: 'claude-3-haiku-20240307', displayName: 'Claude 3 Haiku' },
   // Add other valid models as needed, remove invalid ones like 'claude-3.7-sonnet'
   // { id: 'claude-3-sonnet-20240229', name: 'claude-3-sonnet-20240229' }, 

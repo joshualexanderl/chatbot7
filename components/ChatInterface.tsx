@@ -1,17 +1,29 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { ImageIcon, ArrowUp, Check, Loader2 } from 'lucide-react';
+import { ImageIcon, ArrowUp, Check, Loader2, PlusIcon, BookText, XIcon } from 'lucide-react';
 import { createPortal } from 'react-dom';
-import { getUserModelSettings, updateUserSelectedModel, getAnthropicResponse } from '@/app/actions'; // Keep model actions if needed in chat view
+import { getUserModelSettings, updateUserSelectedModel, getAnthropicResponse, addMessage, getMessagesForChat, updateChatName } from '@/app/actions'; // Keep model actions if needed in chat view
 import { SettingsModal } from './settings-modal';
 import { v4 as uuidv4 } from 'uuid';
+import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
+import { 
+  DropdownMenu, 
+  DropdownMenuContent, 
+  DropdownMenuItem, 
+  DropdownMenuTrigger 
+} from "@/components/ui/dropdown-menu";
+import { ContextSelectorModal } from "./context-selector-modal";
+import { ContextItem } from '@/app/actions';
 
 // Define available models with display names within this component
 // TODO: Centralize this definition later if needed
 const availableModelsForDisplay = [
+  { id: 'claude-3-7-sonnet-20250219', displayName: 'Claude 3.7 Sonnet' },
   { id: 'claude-3-opus-20240229', displayName: 'Claude 3 Opus' }, 
   { id: 'claude-3-5-sonnet-20240620', displayName: 'Claude 3.5 Sonnet' },
+  { id: 'claude-3-sonnet-20240229', displayName: 'Claude 3 Sonnet' },
   { id: 'claude-3-haiku-20240307', displayName: 'Claude 3 Haiku' },
   // Add others matching the settings modal
 ];
@@ -32,10 +44,9 @@ interface Message {
 
 interface ChatInterfaceProps {
   chatId: string;
-  initialPrompt?: string; // Add optional initialPrompt prop
 }
 
-export function ChatInterface({ chatId, initialPrompt }: ChatInterfaceProps) {
+export function ChatInterface({ chatId }: ChatInterfaceProps) {
   const [prompt, setPrompt] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -54,7 +65,22 @@ export function ChatInterface({ chatId, initialPrompt }: ChatInterfaceProps) {
   const [enabledModels, setEnabledModels] = useState<string[]>([]);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [isLoadingModels, setIsLoadingModels] = useState(true);
+  const [isLoadingMessages, setIsLoadingMessages] = useState(true);
+  const [messageError, setMessageError] = useState<string | null>(null);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false); 
+  const [hasTriggeredInitialResponse, setHasTriggeredInitialResponse] = useState(false); // Flag to prevent multiple triggers
+
+  // --- State for Context Modal ---
+  const [isContextModalOpen, setIsContextModalOpen] = useState(false);
+
+  // --- New State for Attached Context --- 
+  const [attachedContextItem, setAttachedContextItem] = useState<ContextItem | null>(null);
+
+  // --- New State for Attached Image --- 
+  const [attachedImage, setAttachedImage] = useState<File | null>(null);
+
+  // --- Calculate Attachment Count --- 
+  const attachmentCount = (attachedContextItem ? 1 : 0) + (attachedImage ? 1 : 0);
 
   // --- Load Models (Copied from IdeInterface for now) ---
   const loadModels = useCallback(async () => {
@@ -72,70 +98,131 @@ export function ChatInterface({ chatId, initialPrompt }: ChatInterfaceProps) {
     }
   }, []); 
 
-  // --- Effect to handle the initial prompt --- 
+  // --- Combined useEffect for initial loading --- 
   useEffect(() => {
-    const handleInitialPrompt = async () => {
-      if (initialPrompt && messages.length === 0 && !isLoadingModels && selectedModel) { 
-        console.log(`ChatInterface received initial prompt for chat ${chatId}:`, initialPrompt);
-        
-        const initialUserMessage: Message = {
-          id: uuidv4(),
-          sender: 'user',
-          content: initialPrompt
-        };
-        // Add user message immediately
-        setMessages([initialUserMessage]); 
+    let isMounted = true; // Prevent state updates if component unmounts
+    setIsLoadingMessages(true); // Start loading messages
+    setMessageError(null);
+    setHasTriggeredInitialResponse(false); // Reset flag on chat change
+    setAttachedContextItem(null); // Clear attached context on chat change
+    setAttachedImage(null); // Clear attached image on chat change
+    loadModels(); // Load model settings concurrently
 
-        setIsAiResponding(true);
-        if (textareaRef.current) textareaRef.current.disabled = true;
-        
-        try {
-          // Call the server action with the initial message
-          const result = await getAnthropicResponse([initialUserMessage], selectedModel);
+    // Fetch existing messages
+    getMessagesForChat(chatId)
+      .then(fetchedMessages => {
+        if (isMounted) {
+            setMessages(fetchedMessages);
+            setIsLoadingMessages(false);
 
-          let aiResponseMessage: Message;
-          if (result.success && result.response) {
-            aiResponseMessage = {
-              id: uuidv4(),
-              sender: 'ai',
-              content: result.response
-            };
-          } else {
-            aiResponseMessage = {
-              id: uuidv4(),
-              sender: 'ai',
-              content: `Error: ${result.error || 'Failed to get response from AI.'}`
-            };
-            console.error("AI Error:", result.error);
+            // Trigger initial AI response if exactly one message exists and models are loaded
+            if (fetchedMessages.length === 1 && fetchedMessages[0].sender === 'user') {
+              setHasTriggeredInitialResponse(true); // Set flag immediately
+              triggerInitialResponse(fetchedMessages[0]);
+            }
+        }
+      })
+      .catch(error => {
+        console.error("Failed to fetch chat messages:", error);
+        if (isMounted) {
+          setMessageError("Failed to load chat history.");
+          setIsLoadingMessages(false);
+        }
+      });
+
+      return () => { isMounted = false; }; // Cleanup function
+
+  }, [chatId, loadModels]); // Only depend on chatId and loadModels
+
+  // --- Function to trigger the initial AI response ---
+  // Renamed from handleInitialPromptFlow
+  const triggerInitialResponse = useCallback(async (initialUserMessage: Message) => {
+      // Wait for model to be selected if it's still loading
+      let currentModel = selectedModel;
+      if (isLoadingModels) {
+          console.log("Initial response trigger waiting for models to load...");
+          // Simple wait loop (consider a more robust state-based approach if needed)
+          let waitCount = 0;
+          while (isLoadingModels && waitCount < 50) { // Max ~5 seconds wait
+              await new Promise(resolve => setTimeout(resolve, 100));
+              waitCount++;
           }
-          setMessages(prev => [...prev, aiResponseMessage]);
+          // Re-fetch the potentially updated selectedModel after waiting
+          const settings = await getUserModelSettings(); // Re-fetch to get latest selected model
+          currentModel = settings.selectedModel;
+          if (!currentModel) {
+               console.error("Initial response trigger: Model still not available after waiting.");
+               setMessageError("Could not determine AI model to use for initial response.");
+               return;
+          }
+          console.log(`Initial response trigger: Model loaded (${currentModel}), proceeding.`);
+      } else if (!currentModel) {
+          console.error("Initial response trigger: No model selected and not loading.");
+          setMessageError("No AI model selected for initial response.");
+          return;
+      }
 
-        } catch (error) {
-          console.error("Error calling getAnthropicResponse (initial):", error);
-          const errorMsg: Message = {
-            id: uuidv4(),
-            sender: 'ai',
-            content: "An error occurred while processing your request."
-          };
-          setMessages(prev => [...prev, errorMsg]);
-        } finally {
+      console.log(`ChatInterface triggering AI for initial message:`, initialUserMessage.content);
+
+      setIsAiResponding(true);
+      if (textareaRef.current) textareaRef.current.disabled = true;
+
+      try {
+        // Use the potentially updated currentModel
+        const result = await getAnthropicResponse([initialUserMessage], currentModel);
+
+        let aiContent: string;
+        let messageToSave: Message | null = null;
+
+        if (result.success && result.response) {
+          aiContent = result.response;
+          messageToSave = { id: uuidv4(), sender: 'ai', content: aiContent };
+
+          // Save AI message ONLY (name is already set)
+          addMessage(chatId, 'ai', aiContent, currentModel)
+             .catch(err => console.error("Error saving initial AI message:", err));
+          
+          // Remove chat name update logic
+          /*
+          Promise.all([
+             addMessage(chatId, 'ai', aiContent, currentModel),
+             // Generate and save name based on initial prompt
+             (() => { 
+                 const generatedName = initialUserMessage.content.substring(0, 40) + (initialUserMessage.content.length > 40 ? '...' : '');
+                 console.log(`Generated chat name: ${generatedName}`);
+                 return updateChatName(chatId, generatedName);
+             })()
+          ]).catch(err => console.error("Error saving initial AI message or chat name:", err));
+          */
+
+        } else {
+          aiContent = `Error: ${result.error || 'Failed to get response from AI.'}`;
+          messageToSave = { id: uuidv4(), sender: 'ai', content: aiContent };
+          console.error("Initial AI Error:", result.error);
+        }
+        setMessages(prev => [...prev, messageToSave!]);
+      } catch (error) {
+        console.error("Error calling getAnthropicResponse (initial flow):", error);
+        const errorMsg: Message = { id: uuidv4(), sender: 'ai', content: "An error occurred while processing your request." };
+        setMessages(prev => [...prev, errorMsg]);
+      } finally {
+        // Add a small delay before hiding loading to ensure it renders
+        setTimeout(() => {
           setIsAiResponding(false);
           if (textareaRef.current) textareaRef.current.disabled = false;
           textareaRef.current?.focus();
-        }
+        }, 50); // 50ms delay
       }
-    };
+  }, [chatId, selectedModel, isLoadingModels, addMessage, updateChatName]); // Dependencies
 
-    handleInitialPrompt();
-    // Dependency array includes variables needed to decide IF and HOW to run
-  }, [initialPrompt, chatId, messages.length, isLoadingModels, selectedModel]); 
-
-  // useEffect for loadModels and console log (keep chatId dependency)
-  useEffect(() => {
-    loadModels();
-    console.log("ChatInterface mounted for chatId:", chatId);
-    // Initial prompt handling is now in its own useEffect
-  }, [loadModels, chatId]);
+  // Effect to trigger initial response if messages load BEFORE models
+   useEffect(() => {
+     if (!isLoadingMessages && !isLoadingModels && !hasTriggeredInitialResponse && messages.length === 1 && messages[0].sender === 'user') {
+       console.log("Models loaded after messages, triggering initial response now.");
+       setHasTriggeredInitialResponse(true); // Set flag
+       triggerInitialResponse(messages[0]);
+     }
+   }, [isLoadingMessages, isLoadingModels, messages, hasTriggeredInitialResponse, triggerInitialResponse]);
 
   const handleSettingsChanged = useCallback(() => {
      loadModels(); 
@@ -168,9 +255,11 @@ export function ChatInterface({ chatId, initialPrompt }: ChatInterfaceProps) {
     }
   }, [isModelDropdownOpen]);
 
-  // ... handleImageUpload / handleImageChange ...
-  const handleImageUpload = () => {
+  // --- Image upload logic (remains, but triggered differently) ---
+  const triggerImageUpload = () => {
     if (fileInputRef.current) {
+      // Reset value to allow uploading the same file again
+      fileInputRef.current.value = ""; 
       fileInputRef.current.click();
     }
   };
@@ -178,8 +267,20 @@ export function ChatInterface({ chatId, initialPrompt }: ChatInterfaceProps) {
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files && files.length > 0) {
-      console.log("Image uploaded:", files[0]);
+      console.log("Image selected:", files[0]);
+      setAttachedImage(files[0]);
+      // TODO: Add visual indicator for attached image (e.g., thumbnail, name)
+      // For now, only the count badge updates
+    } else {
+      setAttachedImage(null); // Clear if selection is cancelled
     }
+  };
+
+  // Clear the attached image
+  const handleRemoveImage = () => {
+      setAttachedImage(null);
+      // Optional: Add focus back to textarea
+      // textareaRef.current?.focus(); 
   };
 
   // ... handlePromptChange ...
@@ -187,50 +288,85 @@ export function ChatInterface({ chatId, initialPrompt }: ChatInterfaceProps) {
     setPrompt(e.target.value);
   };
 
-  // --- handleSubmit for SUBSEQUENT messages --- 
+  // --- Updated handler to accept ContextItem and store it --- 
+  const handleAddContext = (item: ContextItem) => {
+    setAttachedContextItem(item);
+    textareaRef.current?.focus(); 
+  };
+
+  // --- Handler to remove attached context --- 
+  const handleRemoveContext = () => {
+    setAttachedContextItem(null);
+    textareaRef.current?.focus(); 
+  };
+
+  // --- Updated handleSubmit to include attached context --- 
   const handleSubmit = async () => {
     const currentPrompt = prompt.trim();
+    // Only require typed prompt now. Attachments are handled separately.
     if (!currentPrompt || isAiResponding || !selectedModel) {
+        if (!currentPrompt) console.log("Submit cancelled: No prompt text.");
         if (!selectedModel) console.error("Submit cancelled: No model selected");
         return; 
     }
 
+    // NOTE: We are NOT prepending context/image info to the user message content here.
+    // The backend would need to know about attachedContextItem.id and attachedImage 
+    // separately if it needs to use them.
     const newUserMessage: Message = {
       id: uuidv4(),
       sender: 'user',
-      content: currentPrompt
+      content: currentPrompt // Send only the typed prompt
     };
     
-    // Add user message and update state immediately
-    const updatedMessages = [...messages, newUserMessage];
-    setMessages(updatedMessages);
-    setPrompt(""); 
+    // Include the user message in the list sent to the API
+    // The API might need modification if it relies on context being inline
+    const updatedMessagesForApi = [...messages, newUserMessage]; 
+    setMessages(updatedMessagesForApi); // Update UI immediately
     
+    // Clear prompt and attachments
+    setPrompt(""); 
+    setAttachedContextItem(null); 
+    setAttachedImage(null); 
+    
+    // Save user message (only the typed content)
+    addMessage(chatId, 'user', currentPrompt)
+      .catch(err => console.error("Error saving user message:", err));
+
     setIsAiResponding(true); 
     if(textareaRef.current) textareaRef.current.disabled = true;
     
     try {
-      console.log(`Submitting follow-up prompt for chat ${chatId}:`, currentPrompt);
-      // Pass the updated message list to the action
-      const result = await getAnthropicResponse(updatedMessages, selectedModel);
+      console.log(`Submitting prompt for chat ${chatId} with model ${selectedModel}`);
+      // Pass the updated message list AND the context item ID
+      const result = await getAnthropicResponse(
+          updatedMessagesForApi, 
+          selectedModel,
+          attachedContextItem?.id || null // Pass the context ID here
+      );
 
-      let aiResponseMessage: Message;
+      let aiContent: string;
+      let messageToSave: Message | null = null;
+
       if (result.success && result.response) {
-        aiResponseMessage = {
-          id: uuidv4(),
-          sender: 'ai',
-          content: result.response
-        };
+        aiContent = result.response;
+         messageToSave = {
+              id: uuidv4(),
+              sender: 'ai',
+              content: aiContent
+            };
+        addMessage(chatId, 'ai', aiContent, selectedModel)
+          .catch(err => console.error("Error saving AI message:", err));
       } else {
-        aiResponseMessage = {
-          id: uuidv4(),
-          sender: 'ai',
-          content: `Error: ${result.error || 'Failed to get response from AI.'}`
-        };
-        console.error("AI Error:", result.error);
+        aiContent = `Error: ${result.error || 'Failed to get response from AI.'}`;
+        messageToSave = {
+              id: uuidv4(),
+              sender: 'ai',
+              content: aiContent
+            };
+        console.error("Follow-up AI Error:", result.error);
       }
-      // Add the AI response (or error) to the messages
-      setMessages(prev => [...prev, aiResponseMessage]);
+      setMessages(prev => [...prev, messageToSave!]);
 
     } catch (error) {
       console.error("Error calling getAnthropicResponse (follow-up):", error);
@@ -239,7 +375,6 @@ export function ChatInterface({ chatId, initialPrompt }: ChatInterfaceProps) {
         sender: 'ai',
         content: "An error occurred while processing your request."
       };
-       // Add the error message to the messages
       setMessages(prev => [...prev, errorMsg]);
     } finally {
       setIsAiResponding(false); 
@@ -248,38 +383,51 @@ export function ChatInterface({ chatId, initialPrompt }: ChatInterfaceProps) {
     }
   };
 
-  // --- Handler for Textarea Enter key --- 
+  // Submit only requires prompt text now
   const handleTextareaKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey && prompt.trim()) {
+    if (e.key === 'Enter' && !e.shiftKey && prompt.trim() && !isAiResponding) { 
         e.preventDefault(); 
         handleSubmit();
     }
   };
 
-  // ... handleModelSelect (similar to IdeInterface) ...
+  // --- handleModelSelect --- 
   const handleModelSelect = async (modelId: string) => {
     setSelectedModel(modelId);
     setIsModelDropdownOpen(false); 
     try {
-      await updateUserSelectedModel(modelId);
+      // Ensure updateUserSelectedModel is imported if needed here
+      await updateUserSelectedModel(modelId); 
     } catch (error) {
        console.error("Error calling updateUserSelectedModel:", error);
     }
   };
 
-  // Effect to scroll to bottom when new messages are added
+  // --- scroll effect --- 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // --- JSX for the Active Chat View --- 
+  // ... JSX for the Active Chat View --- 
   return (
     <div className="h-full flex flex-col bg-white"> 
       {/* Chat message display area */}
       <main className="flex-1 overflow-y-auto p-6 pb-24"> { /* Added padding-bottom */ }
         <div className="w-full max-w-3xl mx-auto space-y-6">
+          {/* Loading state for messages */}
+          {isLoadingMessages && (
+            <>
+              <Skeleton className="h-10 w-3/4 rounded-lg" />
+              <Skeleton className="h-16 w-full rounded-lg self-end" />
+              <Skeleton className="h-10 w-3/4 rounded-lg" />
+            </>
+          )}
+          {/* Error state for messages */}
+          {!isLoadingMessages && messageError && (
+            <div className="text-center text-red-600 py-4">{messageError}</div>
+          )}
           {/* Display existing/new messages */}
-          {messages.map((msg) => (
+          {!isLoadingMessages && !messageError && messages.map((msg) => (
             <div key={msg.id} className={`flex flex-col ${msg.sender === 'user' ? 'items-end' : 'items-start'}`}>
                 { /* User Message Styling */ }
                 {msg.sender === 'user' && (
@@ -315,27 +463,28 @@ export function ChatInterface({ chatId, initialPrompt }: ChatInterfaceProps) {
       {/* Input area - Sticky at the bottom */}
       <div className="w-full max-w-3xl mx-auto px-6 pb-4 sticky bottom-0 bg-gradient-to-t from-white via-white/90 to-transparent pt-4">
         <div className="relative rounded-2xl border border-gray-200 bg-white overflow-hidden shadow-sm">
+          {/* Input Row */} 
           <div className="flex flex-col">
-            {/* Text input section */}
+            {/* Text input section */} 
             <div className="w-full relative">
               <textarea
                 ref={textareaRef}
-                className="w-full resize-none text-base focus:outline-none text-stone-900 placeholder:text-gray-500 bg-transparent px-5 py-3 min-h-[48px] max-h-[360px] pr-10"
-                placeholder="Ask follow-up..."
+                // Reverted class changes, context no longer shown here
+                className={`w-full resize-none text-base focus:outline-none text-stone-900 placeholder:text-gray-500 bg-transparent px-5 py-3 min-h-[48px] max-h-[360px] pr-10`}
+                placeholder={"Ask follow-up..."} // Reverted placeholder
                 value={prompt}
                 onChange={handlePromptChange}
                 onKeyDown={handleTextareaKeyDown}
                 rows={1}
                 disabled={isAiResponding}
               />
-              {/* No tab button needed here */}
             </div>
 
-            {/* Controls section */}
+            {/* Controls section */} 
             <div className="border-t border-gray-200 px-4 py-2 flex items-center justify-between">
-              {/* Left Controls */}
+              {/* Left Controls */} 
               <div className="flex items-center gap-2">
-                {/* Model Selector */}
+                {/* Model Selector */} 
                 <div className="relative" ref={dropdownRef}>
                    <button 
                         className="text-gray-500 flex items-center gap-1 text-sm hover:bg-gray-100 px-2 py-1 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
@@ -352,7 +501,7 @@ export function ChatInterface({ chatId, initialPrompt }: ChatInterfaceProps) {
                         </span>
                         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8 10L4 6H12L8 10Z" fill="#6B7280"/></svg>
                     </button>
-                    {/* Model Dropdown Portal */}
+                    {/* Model Dropdown Portal */} 
                     {isModelDropdownOpen && typeof document !== 'undefined' && createPortal(
                         <div className="fixed bg-white rounded-md shadow-lg border border-gray-200 w-56 z-50" style={{ top: `${modelDropdownPosition.top}px`, left: `${modelDropdownPosition.left}px`, transform: 'translateY(-100%)' }}>
                             <div className="p-1.5">
@@ -376,22 +525,59 @@ export function ChatInterface({ chatId, initialPrompt }: ChatInterfaceProps) {
                         </div>,
                     document.body)}
                 </div>
-                {/* Image Upload */}
-                <button 
-                    className="text-gray-500 relative group hover:bg-gray-100 p-1.5 rounded-md transition-colors" 
-                    aria-label="Upload image" 
-                    onClick={handleImageUpload}
-                >
-                    <ImageIcon className="h-5 w-5" />
-                    <input type="file" ref={fileInputRef} className="hidden" accept="image/png,image/jpeg" onChange={handleImageChange}/>
-                </button>
+                {/* Add Content Dropdown with Badge */} 
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="relative text-gray-500 hover:bg-gray-100 h-8 w-8 p-1.5 rounded-md mr-2" // Added relative positioning
+                      aria-label="Add content"
+                      // Removed disabled logic based on attachment
+                    >
+                      <PlusIcon className="h-5 w-5" />
+                      {/* --- Attachment Count Badge --- */}
+                      {attachmentCount > 0 && (
+                        <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-black text-white text-[10px] font-semibold">
+                          {attachmentCount}
+                        </span>
+                      )}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-48">
+                    {/* --- Conditional Image Item --- */}
+                    {attachedImage ? (
+                      <DropdownMenuItem onSelect={handleRemoveImage} className="text-red-600 hover:bg-red-50 focus:bg-red-50 focus:text-red-700">
+                         <XIcon className="mr-2 h-4 w-4" />
+                         <span>Remove Image ({attachedImage.name.length > 15 ? attachedImage.name.substring(0, 15) + '...' : attachedImage.name})</span>
+                      </DropdownMenuItem>
+                    ) : (
+                      <DropdownMenuItem onSelect={triggerImageUpload}>
+                        <ImageIcon className="mr-2 h-4 w-4" />
+                        <span>Upload Image</span>
+                      </DropdownMenuItem>
+                    )}
+                    {/* --- Updated Context Item (to match IdeInterface) --- */}
+                    <DropdownMenuItem 
+                      onSelect={() => setIsContextModalOpen(true)}
+                      className="flex items-center justify-between"
+                    >
+                      <div className="flex items-center"> 
+                        <BookText className="mr-2 h-4 w-4 flex-shrink-0" />
+                        <span className="flex-grow">Add Context</span>
+                      </div>
+                      {attachedContextItem && <Check className="h-4 w-4 text-black ml-2 flex-shrink-0" strokeWidth={2} />} 
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
-              {/* Submit Button */}
+              {/* Submit Button */} 
               <button 
-                className={`flex items-center justify-center h-8 w-8 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${prompt.trim() ? "bg-black text-white hover:bg-gray-800" : "bg-white text-gray-400 border border-gray-300"}`}
+                className={`flex items-center justify-center h-8 w-8 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${ prompt.trim() ? "bg-black text-white hover:bg-gray-800" : "bg-white text-gray-400 border border-gray-300"}`}
                 aria-label="Submit prompt"
                 onClick={handleSubmit}
-                disabled={!prompt.trim() || isAiResponding}
+                // Disable only if prompt is empty or AI is responding
+                disabled={!prompt.trim() || isAiResponding} 
               >
                 {isAiResponding ? <Loader2 className="h-4 w-4 animate-spin"/> : <ArrowUp className="h-4 w-4" />}
               </button>
@@ -406,6 +592,24 @@ export function ChatInterface({ chatId, initialPrompt }: ChatInterfaceProps) {
          setIsOpen={setIsSettingsModalOpen} 
          onSettingsChanged={handleSettingsChanged} 
        />
+
+      {/* --- Render Context Modal (with updated props) --- */}
+      <ContextSelectorModal 
+        isOpen={isContextModalOpen}
+        setIsOpen={setIsContextModalOpen}
+        onAddContext={handleAddContext}
+        attachedContextItemId={attachedContextItem?.id || null} // Pass current ID
+        onRemoveContext={handleRemoveContext} // Pass remove handler
+      />
+
+      {/* --- Hidden File Input (remains) --- */}
+      <input 
+        type="file" 
+        ref={fileInputRef} 
+        className="hidden" 
+        accept="image/png,image/jpeg" 
+        onChange={handleImageChange}
+      />
     </div>
   );
 } 

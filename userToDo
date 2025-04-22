@@ -37,3 +37,127 @@ alter table public.profiles
 
 alter table public.profiles
     add column selected_model text; 
+
+
+
+
+
+-- 1. Create the 'chats' table
+CREATE TABLE public.chats (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE, -- References your existing user profiles table
+  name TEXT NULL, -- User-friendly name, can be null initially
+  model_id TEXT NULL, -- Model used when chat was created or last used
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Optional: Add an index on user_id for faster querying of a user's chats
+CREATE INDEX idx_chats_user_id ON public.chats(user_id);
+
+-- IMPORTANT: Enable Row Level Security (RLS) on the chats table
+ALTER TABLE public.chats ENABLE ROW LEVEL SECURITY;
+
+-- Define RLS policies for chats (Users can only access their own chats)
+-- Example: Allow SELECT if user_id matches authenticated user
+CREATE POLICY "Allow SELECT for own chats" ON public.chats
+  FOR SELECT USING (auth.uid() = user_id);
+
+-- Example: Allow INSERT for own chats
+CREATE POLICY "Allow INSERT for own chats" ON public.chats
+  FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+-- Example: Allow UPDATE for own chats
+CREATE POLICY "Allow UPDATE for own chats" ON public.chats
+  FOR UPDATE USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+-- Example: Allow DELETE for own chats
+CREATE POLICY "Allow DELETE for own chats" ON public.chats
+  FOR DELETE USING (auth.uid() = user_id);
+
+
+-- 2. Create the 'messages' table
+CREATE TABLE public.messages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  chat_id UUID NOT NULL REFERENCES public.chats(id) ON DELETE CASCADE, -- Link to the parent chat
+  user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE, -- Link to the user (matches chat's user)
+  sender TEXT NOT NULL CHECK (sender IN ('user', 'ai')), -- Role of the message sender
+  content TEXT NOT NULL, -- The message text
+  model_id TEXT NULL, -- Optional: Track model per AI response if needed
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Optional: Add indexes for faster querying of messages within a chat, ordered by time
+CREATE INDEX idx_messages_chat_id ON public.messages(chat_id);
+CREATE INDEX idx_messages_created_at ON public.messages(created_at);
+-- Consider a composite index if you frequently query by chat_id AND order by created_at
+-- CREATE INDEX idx_messages_chat_id_created_at ON public.messages(chat_id, created_at);
+
+-- IMPORTANT: Enable Row Level Security (RLS) on the messages table
+ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
+
+-- Define RLS policies for messages (Users can only access messages in their own chats)
+-- Example: Allow SELECT if the message belongs to a chat owned by the user
+CREATE POLICY "Allow SELECT for messages in own chats" ON public.messages
+  FOR SELECT USING (
+    EXISTS (
+      SELECT 1
+      FROM public.chats
+      WHERE chats.id = messages.chat_id AND chats.user_id = auth.uid()
+    )
+  );
+
+-- Example: Allow INSERT if the message belongs to a chat owned by the user
+CREATE POLICY "Allow INSERT for messages in own chats" ON public.messages
+  FOR INSERT WITH CHECK (
+    EXISTS (
+      SELECT 1
+      FROM public.chats
+      WHERE chats.id = messages.chat_id AND chats.user_id = auth.uid()
+    )
+     -- Also ensure the user_id on the message matches the authenticated user
+    AND auth.uid() = user_id
+  );
+
+-- Example: Allow UPDATE (less common for messages, maybe for feedback?)
+-- Restrict updates based on ownership
+CREATE POLICY "Allow UPDATE for own messages" ON public.messages
+  FOR UPDATE USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+
+-- Example: Allow DELETE (less common, maybe user deletes their own message?)
+-- Restrict deletes based on ownership
+CREATE POLICY "Allow DELETE for own messages" ON public.messages
+  FOR DELETE USING (auth.uid() = user_id);
+
+
+
+
+-- Function to add a message and update the chat timestamp in one transaction
+CREATE OR REPLACE FUNCTION add_chat_message(
+    p_chat_id UUID,
+    p_user_id UUID,
+    p_sender TEXT,
+    p_content TEXT,
+    p_model_id TEXT DEFAULT NULL -- Make model_id optional here too
+)
+RETURNS VOID -- Or return message ID if needed
+LANGUAGE plpgsql
+SECURITY DEFINER -- Important: Allows function to bypass RLS temporarily for the update
+AS $$
+BEGIN
+  -- Insert the new message
+  INSERT INTO public.messages (chat_id, user_id, sender, content, model_id)
+  VALUES (p_chat_id, p_user_id, p_sender, p_content, p_model_id);
+
+  -- Update the chat's updated_at timestamp
+  UPDATE public.chats
+  SET updated_at = now()
+  WHERE id = p_chat_id AND user_id = p_user_id; -- Ensure user owns the chat being updated
+
+  RETURN;
+END;
+$$;
+
+-- Grant execute permission to the authenticated role
+GRANT EXECUTE ON FUNCTION add_chat_message(UUID, UUID, TEXT, TEXT, TEXT) TO authenticated;

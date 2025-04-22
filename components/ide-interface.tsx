@@ -1,19 +1,28 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { ImageIcon, ArrowUp, Check } from "lucide-react";
+import { ImageIcon, ArrowUp, Check, Loader2, PlusIcon, BookText, XIcon } from "lucide-react";
 import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
-import { getUserModelSettings, updateUserSelectedModel } from '@/app/actions';
+import { 
+  DropdownMenu, 
+  DropdownMenuContent, 
+  DropdownMenuItem, 
+  DropdownMenuTrigger 
+} from "@/components/ui/dropdown-menu";
+import { ContextItem, getUserModelSettings, updateUserSelectedModel, startNewChat } from '@/app/actions';
 import { SettingsModal } from "./settings-modal";
 import { useRouter } from 'next/navigation';
 import { v4 as uuidv4 } from 'uuid';
+import { ContextSelectorModal } from "./context-selector-modal";
 
 // Define available models with display names within this component
 // TODO: Centralize this definition later if needed
 const availableModelsForDisplay = [
+  { id: 'claude-3-7-sonnet-20250219', displayName: 'Claude 3.7 Sonnet' },
   { id: 'claude-3-opus-20240229', displayName: 'Claude 3 Opus' }, 
   { id: 'claude-3-5-sonnet-20240620', displayName: 'Claude 3.5 Sonnet' },
+  { id: 'claude-3-sonnet-20240229', displayName: 'Claude 3 Sonnet' },
   { id: 'claude-3-haiku-20240307', displayName: 'Claude 3 Haiku' },
   // Add others matching the settings modal
 ];
@@ -67,9 +76,20 @@ export function IdeInterfaceComponent() {
   const [enabledModels, setEnabledModels] = useState<string[]>([]);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [isLoadingModels, setIsLoadingModels] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   
   // --- State for Settings Modal ---
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false); 
+  
+  // --- State for Context Modal ---
+  const [isContextModalOpen, setIsContextModalOpen] = useState(false);
+
+  // --- State for Attachments --- 
+  const [attachedContextItem, setAttachedContextItem] = useState<ContextItem | null>(null);
+  const [attachedImage, setAttachedImage] = useState<File | null>(null);
+
+  // --- Calculate Attachment Count --- 
+  const attachmentCount = (attachedContextItem ? 1 : 0) + (attachedImage ? 1 : 0);
 
   // --- Updated Fetch Logic (Moved and wrapped in useCallback) --- 
   const loadModels = useCallback(async () => {
@@ -243,8 +263,10 @@ export function IdeInterfaceComponent() {
     // Allow other keys (like Shift+Enter) to function normally
   };
 
-  const handleImageUpload = () => {
+  // --- Image upload logic (remains, but triggered differently) ---
+  const triggerImageUpload = () => {
     if (fileInputRef.current) {
+      fileInputRef.current.value = ""; // Allow same file selection
       fileInputRef.current.click();
     }
   };
@@ -252,10 +274,15 @@ export function IdeInterfaceComponent() {
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files && files.length > 0) {
-      // Handle the uploaded image
-      console.log("Image uploaded:", files[0]);
-      // In a real app, you would process the image here
+      console.log("IdeInterface: Image selected:", files[0]);
+      setAttachedImage(files[0]);
+    } else {
+      setAttachedImage(null);
     }
+  };
+
+  const handleRemoveImage = () => {
+      setAttachedImage(null);
   };
 
   const handlePromptChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -263,18 +290,49 @@ export function IdeInterfaceComponent() {
     setShowTabButton(false); 
   };
 
-  const handleSubmit = () => {
+  // --- Handler to add context from the modal ---
+  const handleAddContext = (item: ContextItem) => {
+    setAttachedContextItem(item);
+    textareaRef.current?.focus(); 
+  };
+
+  const handleRemoveContext = () => {
+    setAttachedContextItem(null);
+    textareaRef.current?.focus(); 
+  };
+
+  const handleSubmit = async () => {
     const currentPrompt = prompt.trim();
-    if (!currentPrompt) return;
+    if (!currentPrompt || isSubmitting) return;
+
+    setIsSubmitting(true);
     const newChatId = uuidv4();
+    const currentSelectedModel = selectedModel;
 
-    // Encode the prompt for safe inclusion in the URL
-    const encodedPrompt = encodeURIComponent(currentPrompt);
+    try {
+      console.log(`IdeInterface: Starting new chat with prompt: ${currentPrompt}`);
+      const result = await startNewChat(
+          newChatId, 
+          currentPrompt, 
+          currentSelectedModel,
+          attachedContextItem?.id || null
+      );
 
-    // Navigate to the new chat page with the prompt as a query parameter
-    router.push(`/c/${newChatId}?prompt=${encodedPrompt}`);
-
-    // Note: We no longer need to manage chat state here
+      if (result.success) {
+        // Clear attachments on successful navigation
+        setAttachedContextItem(null);
+        setAttachedImage(null);
+        router.push(`/c/${newChatId}`);
+      } else {
+        console.error("Failed to start new chat:", result.error);
+        alert(`Error: ${result.error || 'Could not start chat.'}`);
+      }
+    } catch (error) {
+      console.error("Unexpected error starting chat:", error);
+      alert("An unexpected error occurred.");
+    } finally {
+       setIsSubmitting(false);
+    }
   };
 
   // --- Updated Handler for selecting a model from dropdown --- 
@@ -296,7 +354,7 @@ export function IdeInterfaceComponent() {
             <h1 
               className="text-center font-serif font-medium mb-4 text-[clamp(42px,5vw,62px)] leading-[1.1] text-gray-900"
             >
-              Build powerful chatbots
+              Build custom chatbots
             </h1>
             <p className="text-stone-900 text-center mb-16 text-lg">
               Start with our template and customize to fit your needs
@@ -383,28 +441,69 @@ export function IdeInterfaceComponent() {
                     )}
                   </div>
 
-                  <button 
-                    className="text-gray-500 relative group hover:bg-gray-100 p-1.5 rounded-md transition-colors" 
-                    aria-label="Upload image" 
-                    onClick={handleImageUpload}
-                  >
-                    <ImageIcon className="h-5 w-5" />
-                    <input 
-                      type="file" 
-                      ref={fileInputRef} 
-                      className="hidden" 
-                      accept="image/png,image/jpeg" 
-                      onChange={handleImageChange}
-                    />
-                  </button>
+                  {/* --- New Add Button with Dropdown --- */}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="relative text-gray-500 hover:bg-gray-100 h-8 w-8 p-1.5 rounded-md" 
+                        aria-label="Add content"
+                      >
+                        <PlusIcon className="h-5 w-5" />
+                        {/* --- Attachment Count Badge --- */}
+                        {attachmentCount > 0 && (
+                          <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-black text-white text-[10px] font-semibold">
+                            {attachmentCount}
+                          </span>
+                        )}
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="w-48">
+                      {/* --- Conditional Image Item --- */}
+                      {attachedImage ? (
+                        <DropdownMenuItem onSelect={handleRemoveImage} className="text-red-600 hover:bg-red-50 focus:bg-red-50 focus:text-red-700">
+                          <XIcon className="mr-2 h-4 w-4" />
+                          <span>Remove Image ({attachedImage.name.length > 15 ? attachedImage.name.substring(0, 15) + '...' : attachedImage.name})</span>
+                        </DropdownMenuItem>
+                      ) : (
+                        <DropdownMenuItem onSelect={triggerImageUpload}>
+                          <ImageIcon className="mr-2 h-4 w-4" />
+                          <span>Upload Image</span>
+                        </DropdownMenuItem>
+                      )}
+                      {/* --- Updated Context Item - Adjusted Structure for consistent spacing --- */}
+                      <DropdownMenuItem 
+                        onSelect={() => setIsContextModalOpen(true)}
+                        className="flex items-center justify-between" // Keep justify-between for checkmark placement
+                      >
+                        {/* Keep icon and text together */} 
+                        <BookText className="mr-2 h-4 w-4 flex-shrink-0" /> {/* Added flex-shrink-0 */} 
+                        <span className="flex-grow">Add Context</span> {/* Added flex-grow */} 
+                        
+                        {/* Checkmark pushed to the right */} 
+                        {attachedContextItem && <Check className="h-4 w-4 text-black ml-2 flex-shrink-0" strokeWidth={2} />} 
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                  
+                  {/* --- Hidden File Input (remains) --- */}
+                  <input 
+                    type="file" 
+                    ref={fileInputRef} 
+                    className="hidden" 
+                    accept="image/png,image/jpeg" 
+                    onChange={handleImageChange}
+                  />
+
                 </div>
                 <button 
                   className={`flex items-center justify-center h-8 w-8 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${prompt.trim() ? "bg-black text-white hover:bg-gray-800" : "bg-white text-gray-400 border border-gray-300"}`}
                   aria-label="Submit prompt"
                   onClick={handleSubmit}
-                  disabled={!prompt.trim()} 
+                  disabled={!prompt.trim() || isSubmitting}
                 >
-                   <ArrowUp className="h-4 w-4" />
+                  {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin"/> : <ArrowUp className="h-4 w-4" />}
                 </button>
               </div>
             </div>
@@ -482,6 +581,15 @@ export function IdeInterfaceComponent() {
          setIsOpen={setIsSettingsModalOpen} 
          onSettingsChanged={handleSettingsChanged} 
        />
+
+      {/* Pass new props to ContextSelectorModal */} 
+      <ContextSelectorModal 
+        isOpen={isContextModalOpen}
+        setIsOpen={setIsContextModalOpen}
+        onAddContext={handleAddContext} 
+        attachedContextItemId={attachedContextItem?.id || null} // Pass current ID
+        onRemoveContext={handleRemoveContext} // Pass remove handler
+      />
     </div>
   );
 } 

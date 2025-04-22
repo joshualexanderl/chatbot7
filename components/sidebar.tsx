@@ -2,27 +2,25 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import {
   ChevronLeft,
   ChevronDown,
-  MoreHorizontal,
-  Share,
-  Pencil,
-  Trash2,
-  FolderPlus,
   Plus,
   Mail,
   ArrowRight,
   Settings,
   LogOut,
-  User
+  User,
+  MoreHorizontal,
 } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { createSupabaseClient } from "@/utils/supabase/client";
 import { SettingsModal } from "./settings-modal";
+import { DeleteConfirmationModal } from "./delete-confirmation-modal";
+import { getChatHistory, deleteChat } from "@/app/actions";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export interface SidebarProps {
   className?: string;
@@ -30,6 +28,12 @@ export interface SidebarProps {
   collapsed?: boolean;
   isAuthenticated: boolean;
   activePlanName: string | null;
+}
+
+// Define type for chat history items
+interface ChatHistoryItem {
+  id: string;
+  title: string;
 }
 
 // Helper function to capitalize first letter
@@ -41,20 +45,24 @@ function capitalizeFirstLetter(string: string | null): string {
 export function SidebarComponent({ className, onToggleCollapse, collapsed = false, isAuthenticated, activePlanName }: SidebarProps) {
   const [isWorkspaceCollapsed, setIsWorkspaceCollapsed] = useState(false);
   const [isHistoryCollapsed, setIsHistoryCollapsed] = useState(false);
-  const [activeDropdown, setActiveDropdown] = useState<number | null>(null);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
   const profileMenuRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
+  const pathname = usePathname();
+
+  // --- State for Chat History ---
+  const [chatHistory, setChatHistory] = useState<ChatHistoryItem[]>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(true);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+
+  // --- State for Delete Confirmation ---
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [chatToDelete, setChatToDelete] = useState<ChatHistoryItem | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setActiveDropdown(null);
-      }
-      
-      // Fix: Don't close profile menu if the click is on the profile button itself
       const profileButton = document.querySelector('.profile-button');
       if (
         profileMenuRef.current && 
@@ -70,6 +78,31 @@ export function SidebarComponent({ className, onToggleCollapse, collapsed = fals
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, []);
+
+  // --- useEffect to fetch chat history --- 
+  useEffect(() => {
+    console.log("[Sidebar Effect] Running due to auth/path change:", { isAuthenticated, pathname });
+    if (isAuthenticated) { 
+      setIsLoadingHistory(true);
+      setHistoryError(null);
+      getChatHistory()
+        .then(history => {
+          console.log("[Sidebar Effect] Fetched history:", history);
+          setChatHistory(history);
+        })
+        .catch(error => {
+          console.error("Sidebar fetch history error:", error);
+          setHistoryError("Failed to load history.");
+        })
+        .finally(() => {
+          setIsLoadingHistory(false);
+        });
+    } else {
+      console.log("[Sidebar Effect] Clearing history due to !isAuthenticated");
+      setChatHistory([]);
+      setIsLoadingHistory(false);
+    }
+  }, [isAuthenticated, pathname]);
 
   const handleCollapseClick = () => {
     if (onToggleCollapse) {
@@ -126,6 +159,34 @@ export function SidebarComponent({ className, onToggleCollapse, collapsed = fals
     router.refresh();
   };
 
+  const handleDeleteChat = async () => {
+    if (!chatToDelete || isDeleting) return;
+
+    const deletedChatId = chatToDelete.id;
+    setIsDeleting(true);
+    setIsDeleteModalOpen(false);
+
+    try {
+      const result = await deleteChat(deletedChatId);
+      if (result.success) {
+        setChatHistory(prevHistory => prevHistory.filter(chat => chat.id !== deletedChatId));
+        
+        if (pathname === `/c/${deletedChatId}`) {
+          router.push('/');
+        }
+      } else {
+        console.error("Failed to delete chat:", result.error);
+        // TODO: Show error toast to user
+      }
+    } catch (error) {
+      console.error("Error calling deleteChat:", error);
+      // TODO: Show error toast
+    } finally {
+      setIsDeleting(false);
+      setChatToDelete(null);
+    }
+  };
+
   return (
     <div
       className={cn(
@@ -173,7 +234,7 @@ export function SidebarComponent({ className, onToggleCollapse, collapsed = fals
 
           <Separator className="bg-stone-200"/>
 
-          <ScrollArea className="flex-1 px-3 py-2">
+          <div className="flex-1 overflow-y-auto px-3 py-2">
             <div className="mb-2">
               <button 
                 className="flex items-center justify-between w-full px-1.5 py-1.5 text-sm font-bold text-stone-700 rounded-md"
@@ -189,31 +250,16 @@ export function SidebarComponent({ className, onToggleCollapse, collapsed = fals
               </button>
               {!isWorkspaceCollapsed && (
                 <div className="mt-1 space-y-1 animate-in fade-in duration-200">
-                   <Button variant="ghost" className="justify-start w-full text-stone-700 hover:bg-stone-200 text-sm px-1.5">
+                   <Button 
+                     variant="ghost" 
+                     className="justify-start w-full text-stone-700 hover:bg-stone-200 text-sm px-1.5"
+                     onClick={() => router.push('/context')}
+                   >
                      <div className="flex items-center gap-2 w-full text-left">
                        <span>📖</span> <span>Context</span>
                      </div>
                    </Button>
-                   <Button variant="ghost" className="justify-start w-full text-stone-700 hover:bg-stone-200 text-sm px-1.5">
-                     <div className="flex items-center gap-2 w-full text-left">
-                       <span>📄</span> <span>Files</span>
-                     </div>
-                   </Button>
-                   <Button variant="ghost" className="justify-start w-full text-stone-700 hover:bg-stone-200 text-sm px-1.5">
-                     <div className="flex items-center gap-2 w-full text-left">
-                       <span>🔍</span> <span>Search</span>
-                     </div>
-                   </Button>
-                   <Button variant="ghost" className="justify-start w-full text-stone-700 hover:bg-stone-200 text-sm px-1.5">
-                     <div className="flex items-center gap-2 w-full text-left">
-                       <span>💻</span> <span>Code</span>
-                     </div>
-                   </Button>
-                   <Button variant="ghost" className="justify-start w-full text-stone-700 hover:bg-stone-200 text-sm px-1.5">
-                     <div className="flex items-center gap-2 w-full text-left">
-                       <span>⌨️</span> <span>Terminal</span>
-                     </div>
-                   </Button>
+
                 </div>
               )}
             </div>
@@ -234,59 +280,58 @@ export function SidebarComponent({ className, onToggleCollapse, collapsed = fals
                 />
               </button>
               {!isHistoryCollapsed && (
-                <div className="mt-1 space-y-1 animate-in fade-in duration-200">
-                  {[0, 1].map((index) => (
+                <div className="mt-1 space-y-1 animate-in fade-in duration-200 w-full overflow-hidden">
+                  {/* Loading State */}
+                  {isLoadingHistory && (
+                    <>
+                      <Skeleton className="h-8 w-full rounded-lg" />
+                      <Skeleton className="h-8 w-full rounded-lg" />
+                    </>
+                  )}
+                  {/* Error State */}
+                  {!isLoadingHistory && historyError && (
+                     <p className="px-1.5 py-2 text-sm text-red-600">{historyError}</p>
+                  )}
+                  {/* Empty State */}
+                  {!isLoadingHistory && !historyError && chatHistory.length === 0 && (
+                    <p className="px-1.5 py-2 text-sm text-stone-500">No chat history yet.</p>
+                  )}
+                  {/* History List */}
+                  {!isLoadingHistory && !historyError && chatHistory.map((chat) => (
                     <div 
-                      key={index}
-                      className="group relative flex items-center w-full px-1.5 py-2 text-sm text-stone-700 hover:bg-stone-200 rounded-lg transition-colors"
+                      key={chat.id}
+                      className="group relative flex items-center w-full overflow-hidden min-w-0"
                     >
-                      <div className="relative grow overflow-hidden whitespace-nowrap text-left" style={{ maskImage: "var(--sidebar-mask)" }}>
-                        {index === 0 ? "Chat about landing page design" : "Refactoring the login component"}
-                      </div>
-                      <button 
-                        className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded absolute right-1"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          setActiveDropdown(activeDropdown === index ? null : index);
-                        }}
+                      <Button 
+                         variant="ghost" 
+                         className="justify-start text-stone-700 hover:bg-stone-200 text-sm px-1.5 py-2 h-auto flex-grow mr-1 min-w-0"
+                         onClick={() => router.push(`/c/${chat.id}`)}
+                         disabled={isDeleting && chatToDelete?.id === chat.id}
                       >
-                        <MoreHorizontal className="h-4 w-4 text-stone-500" />
-                      </button>
-                      {activeDropdown === index && (
-                        <div 
-                          ref={dropdownRef}
-                          className="absolute right-0 top-8 w-[200px] bg-white rounded-lg shadow-lg border border-stone-200 py-1 z-50"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                          }}
-                        >
-                          <button className="w-full px-3 py-2 text-left flex items-center gap-2 hover:bg-stone-100 text-stone-700">
-                            <Share className="h-4 w-4" />
-                            <span>Share</span>
-                          </button>
-                          <button className="w-full px-3 py-2 text-left flex items-center gap-2 hover:bg-stone-100 text-stone-700">
-                            <Pencil className="h-4 w-4" />
-                            <span>Rename</span>
-                          </button>
-                          <button className="w-full px-3 py-2 text-left flex items-center gap-2 hover:bg-stone-100 text-stone-700">
-                            <FolderPlus className="h-4 w-4" />
-                            <span>Add to project</span>
-                          </button>
-                          <Separator className="my-1" />
-                          <button className="w-full px-3 py-2 text-left flex items-center gap-2 hover:bg-stone-100 text-red-600">
-                            <Trash2 className="h-4 w-4" />
-                            <span>Delete</span>
-                          </button>
+                        <div className="relative grow overflow-hidden whitespace-nowrap text-left min-w-0" style={{ maskImage: "var(--sidebar-mask)" }}>
+                          {isDeleting && chatToDelete?.id === chat.id ? 'Deleting...' : chat.title}
                         </div>
-                      )}
+                      </Button>
+                      {/* Three Dot Menu Button - Opens Modal */}
+                       <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          className="h-7 w-7 p-0 flex-shrink-0 text-stone-500 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus:opacity-100"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setChatToDelete(chat);
+                            setIsDeleteModalOpen(true);
+                          }}
+                          disabled={isDeleting && chatToDelete?.id === chat.id}
+                        >
+                          <MoreHorizontal className="h-4 w-4" />
+                        </Button>
                     </div>
                   ))}
                 </div>
               )}
             </div>
-          </ScrollArea>
+          </div>
 
           {/* Conditionally render the entire Upgrade section (Separator + Button div) */}
           {isAuthenticated && !activePlanName && (
@@ -372,6 +417,13 @@ export function SidebarComponent({ className, onToggleCollapse, collapsed = fals
         isOpen={isSettingsModalOpen} 
         setIsOpen={setIsSettingsModalOpen} 
         onSettingsChanged={handleSettingsChanged} 
+      />
+      <DeleteConfirmationModal
+        isOpen={isDeleteModalOpen}
+        setIsOpen={setIsDeleteModalOpen}
+        itemTitle={chatToDelete?.title ?? null}
+        onConfirmDelete={handleDeleteChat}
+        isDeleting={isDeleting}
       />
     </div>
   );

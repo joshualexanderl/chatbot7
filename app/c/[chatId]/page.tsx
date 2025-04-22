@@ -1,16 +1,16 @@
 'use client';
 
-import React, { Suspense } from 'react';
-import { useParams, useSearchParams } from 'next/navigation'; // Import useSearchParams
-import { ChatInterface } from '@/components/ChatInterface'; // Assuming component path
+import React from 'react';
+import { useParams } from 'next/navigation';
+import { ChatInterface } from '@/components/ChatInterface';
 
-// Wrapper component to handle Suspense for useSearchParams
+// Wrapper component to handle Suspense
 function ChatPageContent() {
   const params = useParams();
-  const searchParams = useSearchParams(); // Use the hook here
+  // const searchParams = useSearchParams(); // Remove unused searchParams
 
   const chatId = typeof params.chatId === 'string' ? params.chatId : undefined;
-  const initialPrompt = searchParams.get('prompt'); // Get the 'prompt' query param
+  // const initialPrompt = searchParams.get('prompt'); // Remove unused initialPrompt
 
   if (!chatId) {
     // Handle cases where chatId might be missing or an array (though unlikely here)
@@ -20,19 +20,19 @@ function ChatPageContent() {
   return (
     <ChatInterface 
       chatId={chatId} 
-      // Decode and pass the initial prompt if it exists
-      initialPrompt={initialPrompt ? decodeURIComponent(initialPrompt) : undefined} 
+      // Remove unused initialPrompt prop
+      // initialPrompt={initialPrompt ? decodeURIComponent(initialPrompt) : undefined} 
     />
   );
 }
 
 export default function ChatPage() {
-  // useSearchParams needs to be wrapped in a Suspense boundary
+  // No longer needs Suspense just for searchParams
   return (
     <div className="h-full">
-      <Suspense fallback={<div>Loading Chat...</div>}> {/* Add Suspense Boundary */}
+      {/* <Suspense fallback={<div>Loading Chat...</div>}> */}
         <ChatPageContent />
-      </Suspense>
+      {/* </Suspense> */}
     </div>
   );
 } 
