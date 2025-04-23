@@ -16,6 +16,7 @@ interface ClientLayoutProps {
   children: React.ReactNode;
 }
 
+// Define ClientLayoutContent at the top level
 function ClientLayoutContent({ children }: ClientLayoutProps) {
   const [showSidebar, setShowSidebar] = useState(false);
   const [logoVisible, setLogoVisible] = useState(true);
@@ -161,6 +162,7 @@ function ClientLayoutContent({ children }: ClientLayoutProps) {
   );
 }
 
+// ClientLayout now wraps ClientLayoutContent with AuthProvider
 export function ClientLayout({ children }: ClientLayoutProps) {
   return (
     <AuthProvider>

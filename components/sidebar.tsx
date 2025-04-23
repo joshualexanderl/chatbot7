@@ -22,6 +22,29 @@ import { DeleteConfirmationModal } from "./delete-confirmation-modal";
 import { getChatHistory, deleteChat } from "@/app/actions";
 import { Skeleton } from "@/components/ui/skeleton";
 
+interface ChatHistoryItem {
+  id: string;
+  title: string;
+}
+
+function capitalizeFirstLetter(string: string | null): string {
+  if (!string) return '';
+  return string.charAt(0).toUpperCase() + string.slice(1);
+}
+
+// Define SocialLink at the top level
+const SocialLink = ({ icon: Icon, text, href }: { icon: React.ElementType, text: string, href: string }) => (
+  <a 
+    href={href} 
+    target="_blank" 
+    rel="noopener noreferrer"
+    className="flex items-center gap-3 text-sm text-stone-700 hover:text-stone-900 transition-colors"
+  >
+    <Icon className="h-4 w-4 text-stone-500" />
+    <span>{text}</span>
+  </a>
+);
+
 export interface SidebarProps {
   className?: string;
   onToggleCollapse?: () => void;
@@ -29,18 +52,6 @@ export interface SidebarProps {
   isAuthenticated: boolean;
   activePlanName: string | null;
   isSubscriptionLoading: boolean;
-}
-
-// Define type for chat history items
-interface ChatHistoryItem {
-  id: string;
-  title: string;
-}
-
-// Helper function to capitalize first letter
-function capitalizeFirstLetter(string: string | null): string {
-  if (!string) return '';
-  return string.charAt(0).toUpperCase() + string.slice(1);
 }
 
 export function SidebarComponent({ className, onToggleCollapse, collapsed = false, isAuthenticated, activePlanName, isSubscriptionLoading }: SidebarProps) {
@@ -139,19 +150,6 @@ export function SidebarComponent({ className, onToggleCollapse, collapsed = fals
         fill="currentColor"
       />
     </svg>
-  );
-
-  // Simplified social link component
-  const SocialLink = ({ icon: Icon, text, href }: { icon: React.ElementType, text: string, href: string }) => (
-    <a 
-      href={href} 
-      target="_blank" 
-      rel="noopener noreferrer"
-      className="flex items-center gap-3 text-sm text-stone-700 hover:text-stone-900 transition-colors"
-    >
-      <Icon className="h-4 w-4 text-stone-500" />
-      <span>{text}</span>
-    </a>
   );
 
   // --- Define the callback for settings changes --- 

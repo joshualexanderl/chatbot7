@@ -73,6 +73,12 @@ Follow these steps to get the project running locally and configured for your ow
     *   Ensure your application URL (`http://localhost:3000` for local dev, `https://your-app.com` for prod) is listed in the Supabase `Authentication` -> `URL Configuration` settings.
     *   If using a different provider (like Supabase, Clerk, Firebase Auth, etc.), just paste your JWT when connecting your auth provider to Update. Consult the official [Update Documentation](https://update.dev/docs) for details on integrating various auth providers.
 
+    *   **(If using Supabase) Set up Database Schema:**
+        *   Navigate to the **SQL Editor** section in your Supabase project dashboard (Database -> SQL Editor).
+        *   Open the `setup_db.sql` file located in the root of this repository.
+        *   Copy the entire content of the script.
+        *   Paste the script into a new query tab in the Supabase SQL Editor and click **Run**. This will create the necessary tables (e.g., user profiles) and helper functions required by the template's example logic.
+
 6.  **Set up Environment Variables:**
     *   Copy the example environment file if you haven't already:
         ```bash
