@@ -10,6 +10,7 @@ import Link from "next/link";
 import { twMerge } from "tailwind-merge";
 import { CheckoutSuccessHandler } from "@/components/checkout-success-handler";
 import { getSubscriptionDetails } from "@/app/actions";
+import { ArrowUpRight } from "lucide-react";
 
 interface ClientLayoutProps {
   children: React.ReactNode;
@@ -22,19 +23,24 @@ function ClientLayoutContent({ children }: ClientLayoutProps) {
   const pathname = usePathname();
   
   const [activePlanName, setActivePlanName] = useState<string | null>(null);
+  const [isSubscriptionLoading, setIsSubscriptionLoading] = useState(false);
 
   useEffect(() => {
     const fetchSubscriptionStatus = async () => {
       if (isAuthenticated) {
+        setIsSubscriptionLoading(true);
         try {
           const details = await getSubscriptionDetails();
           setActivePlanName(details.planName);
         } catch (error) {
           console.error("Error fetching subscription status:", error);
           setActivePlanName(null);
+        } finally {
+          setIsSubscriptionLoading(false);
         }
       } else {
         setActivePlanName(null);
+        setIsSubscriptionLoading(false);
       }
     };
 
@@ -81,6 +87,7 @@ function ClientLayoutContent({ children }: ClientLayoutProps) {
           isAuthenticated={isAuthenticated}
           collapsed={!showSidebar}
           activePlanName={activePlanName}
+          isSubscriptionLoading={isSubscriptionLoading}
         />
         <main className={twMerge(
           "h-screen w-full flex-1 relative flex flex-col",
@@ -116,6 +123,15 @@ function ClientLayoutContent({ children }: ClientLayoutProps) {
             </div>
             
             <div className="flex items-center">
+              {/* Show Upgrade Button only when authenticated, not loading, and no active plan */}
+              {isAuthenticated && !isSubscriptionLoading && !activePlanName && <Link 
+                className="relative inline-flex items-center justify-center gap-1 whitespace-nowrap transition-colors focus-visible:outline-hidden disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 bg-stone-900 text-stone-100 hover:bg-stone-800 px-4 py-2 h-10 rounded-full text-sm font-medium shadow-none"
+                href="/pricing"
+              >
+                Upgrade 
+                <ArrowUpRight className="h-4 w-4" />
+              </Link>}
+
               {/* Only show Login/Signup if not authenticated */}
               {!isAuthenticated && (
                 <div className="flex items-center gap-4">

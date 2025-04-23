@@ -39,6 +39,15 @@ export default function SignUp() {
   return (
     <>
       <div className="fixed inset-0 bg-white" />
+      <Link 
+        href="/"
+        className="absolute top-4 right-4 z-10 w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 transition-colors"
+        aria-label="Close and return to homepage"
+      >
+        <svg className="w-4 h-4 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </Link>
       <div className="min-h-screen w-full grid place-items-center relative">
         <div className="absolute top-4 left-4 pl-2">
           <span className="font-bold text-2xl text-zinc-900 cursor-default">start</span>

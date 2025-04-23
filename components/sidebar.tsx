@@ -28,6 +28,7 @@ export interface SidebarProps {
   collapsed?: boolean;
   isAuthenticated: boolean;
   activePlanName: string | null;
+  isSubscriptionLoading: boolean;
 }
 
 // Define type for chat history items
@@ -42,7 +43,7 @@ function capitalizeFirstLetter(string: string | null): string {
   return string.charAt(0).toUpperCase() + string.slice(1);
 }
 
-export function SidebarComponent({ className, onToggleCollapse, collapsed = false, isAuthenticated, activePlanName }: SidebarProps) {
+export function SidebarComponent({ className, onToggleCollapse, collapsed = false, isAuthenticated, activePlanName, isSubscriptionLoading }: SidebarProps) {
   const [isWorkspaceCollapsed, setIsWorkspaceCollapsed] = useState(false);
   const [isHistoryCollapsed, setIsHistoryCollapsed] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
@@ -333,8 +334,8 @@ export function SidebarComponent({ className, onToggleCollapse, collapsed = fals
             </div>
           </div>
 
-          {/* Conditionally render the entire Upgrade section (Separator + Button div) */}
-          {isAuthenticated && !activePlanName && (
+          {/* Conditionally render Upgrade section based on loading state */}
+          {isAuthenticated && !isSubscriptionLoading && !activePlanName && (
             <>
               <Separator className="bg-stone-200"/>
               <div className="px-3 py-2 flex flex-col gap-y-1 flex-shrink-0">

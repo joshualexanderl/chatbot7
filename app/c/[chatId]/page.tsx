@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { useParams } from 'next/navigation';
-import { ChatInterface } from '@/components/ChatInterface';
+import { ChatInterface } from '@/components/chat-interface';
 
 // Wrapper component to handle Suspense
 function ChatPageContent() {

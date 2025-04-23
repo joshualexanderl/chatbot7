@@ -15,6 +15,8 @@ import { SettingsModal } from "./settings-modal";
 import { useRouter } from 'next/navigation';
 import { v4 as uuidv4 } from 'uuid';
 import { ContextSelectorModal } from "./context-selector-modal";
+import { createBrowserClient } from '@supabase/ssr';
+import { Session } from '@supabase/supabase-js';
 
 // Define available models with display names within this component
 // TODO: Centralize this definition later if needed
@@ -45,6 +47,10 @@ const placeholderPrompts = [
 
 export function IdeInterfaceComponent() {
   const router = useRouter();
+  const supabase = createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
   const [prompt, setPrompt] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -77,6 +83,7 @@ export function IdeInterfaceComponent() {
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [isLoadingModels, setIsLoadingModels] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   
   // --- State for Settings Modal ---
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false); 
@@ -114,7 +121,20 @@ export function IdeInterfaceComponent() {
   // --- Initial Load Effect ---
   useEffect(() => {
     loadModels();
-  }, [loadModels]);
+    // Check authentication status
+    const checkAuth = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      setIsAuthenticated(!!session);
+    };
+    checkAuth();
+    // Listen for auth state changes
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event: string, session: Session | null) => {
+      setIsAuthenticated(!!session);
+    });
+    return () => {
+      authListener?.subscription.unsubscribe();
+    };
+  }, [loadModels, supabase]);
 
   // --- Callback for when settings are changed in the modal ---
   const handleSettingsChanged = useCallback(() => {
@@ -302,6 +322,17 @@ export function IdeInterfaceComponent() {
   };
 
   const handleSubmit = async () => {
+    // --- Authentication Check --- 
+    if (isAuthenticated === false) {
+      router.push('/sign-in');
+      return;
+    }
+    // Don't submit if auth status is still loading
+    if (isAuthenticated === null) {
+      console.log("Authentication check pending, submit blocked.");
+      return; 
+    }
+
     const currentPrompt = prompt.trim();
     if (!currentPrompt || isSubmitting) return;
 
@@ -498,12 +529,16 @@ export function IdeInterfaceComponent() {
 
                 </div>
                 <button 
-                  className={`flex items-center justify-center h-8 w-8 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${prompt.trim() ? "bg-black text-white hover:bg-gray-800" : "bg-white text-gray-400 border border-gray-300"}`}
-                  aria-label="Submit prompt"
+                  className="flex items-center justify-center h-8 w-8 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-black text-white hover:bg-gray-800"
                   onClick={handleSubmit}
-                  disabled={!prompt.trim() || isSubmitting}
+                  disabled={isSubmitting || !prompt.trim() || isLoadingModels || (enabledModels.length > 0 && !selectedModel) || isAuthenticated === null}
+                  aria-label="Submit prompt"
                 >
-                  {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin"/> : <ArrowUp className="h-4 w-4" />}
+                  {isSubmitting ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <ArrowUp className="h-4 w-4" />
+                  )}
                 </button>
               </div>
             </div>
