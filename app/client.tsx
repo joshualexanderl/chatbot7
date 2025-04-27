@@ -7,10 +7,9 @@ import { Button } from "@/components/ui/button";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { twMerge } from "tailwind-merge";
-import { CheckoutSuccessHandler } from "@/components/checkout-success-handler";
 import { getSubscriptionDetails } from "@/app/actions";
 import { ArrowUpRight } from "lucide-react";
+import { CheckoutSuccessHandler } from "@/components/checkout-success-handler";
 
 interface ClientLayoutProps {
   children: React.ReactNode;
@@ -90,11 +89,10 @@ function ClientLayoutContent({ children }: ClientLayoutProps) {
           activePlanName={activePlanName}
           isSubscriptionLoading={isSubscriptionLoading}
         />
-        <main className={twMerge(
-          "h-screen w-full flex-1 relative flex flex-col",
-          showSidebar ? "ml-0" : "ml-0"
-        )}>
-          <header className="py-6 px-10 flex items-center justify-between flex-shrink-0">
+        <main className="w-full flex-1 relative">
+          <header 
+            className="sticky top-0 z-10 py-6 px-10 flex items-center justify-between flex-shrink-0" 
+          >
             <div className="flex items-center gap-3">
               {/* Logo with menu button - conditional rendering based on logoVisible */}
               {logoVisible && (
@@ -155,7 +153,11 @@ function ClientLayoutContent({ children }: ClientLayoutProps) {
               {/* If authenticated, show nothing here - handled by sidebar profile */}
             </div>
           </header>
-          {children}
+          <div 
+            className="absolute inset-0 overflow-y-auto bg-transparent px-6 pt-28"
+          >
+             {children} 
+          </div>
         </main>
       </div>
     </ThemeProvider>

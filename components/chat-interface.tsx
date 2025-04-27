@@ -410,10 +410,11 @@ export function ChatInterface({ chatId }: ChatInterfaceProps) {
 
   // ... JSX for the Active Chat View --- 
   return (
-    <div className="h-full flex flex-col bg-white"> 
-      {/* Chat message display area */}
-      <main className="flex-1 overflow-y-auto p-6 pb-24"> { /* Added padding-bottom */ }
-        <div className="w-full max-w-3xl mx-auto space-y-6">
+    <div className="h-full flex flex-col"> 
+      {/* Chat message display area - Removed padding from main */}
+      <main> { /* Removed p-6 pb-24 and other classes*/ }
+        {/* Added bottom padding here to prevent overlap with sticky input */}
+        <div className="w-full max-w-3xl mx-auto space-y-6 pb-24">
           {/* Loading state for messages */}
           {isLoadingMessages && (
             <>
@@ -461,7 +462,7 @@ export function ChatInterface({ chatId }: ChatInterfaceProps) {
       </main>
 
       {/* Input area - Sticky at the bottom */}
-      <div className="w-full max-w-3xl mx-auto px-6 pb-4 sticky bottom-0 bg-gradient-to-t from-white via-white/90 to-transparent pt-4">
+      <div className="w-full max-w-3xl mx-auto pb-4 sticky bottom-0 bg-gradient-to-t from-white via-white/90 to-transparent pt-4">
         <div className="relative rounded-2xl border border-gray-200 bg-white overflow-hidden shadow-sm">
           {/* Input Row */} 
           <div className="flex flex-col">
