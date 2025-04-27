@@ -205,7 +205,33 @@ BEFORE UPDATE ON public.profiles
 FOR EACH ROW
 EXECUTE FUNCTION trigger_set_timestamp();
 
+-- ==========================================================================\
+-- Trigger for Creating Profiles for New Users\
+-- ==========================================================================\
 
--- ==========================================================================
--- End of Script
+-- Function to create a profile entry when a new user signs up
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER -- Important for accessing auth.users
+SET search_path = public
+AS $$
+BEGIN
+  INSERT INTO public.profiles (id, full_name, avatar_url)
+  VALUES (
+    NEW.id,
+    NEW.raw_user_meta_data ->> 'full_name', -- Attempt to get full_name from metadata
+    NEW.raw_user_meta_data ->> 'avatar_url' -- Attempt to get avatar_url from metadata
+  );
+  RETURN NEW;
+END;
+$$;
+
+-- Trigger to call the function after a new user is created in auth.users
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+-- ==========================================================================\
+-- End of Script\
 -- ========================================================================== 
