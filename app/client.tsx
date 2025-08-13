@@ -10,6 +10,7 @@ import Link from "next/link";
 import { getSubscriptionDetails } from "@/app/actions";
 import { ArrowUpRight } from "lucide-react";
 import { CheckoutSuccessHandler } from "@/components/checkout-success-handler";
+import { Suspense } from "react";
 
 interface ClientLayoutProps {
   children: React.ReactNode;
@@ -80,7 +81,9 @@ function ClientLayoutContent({ children }: ClientLayoutProps) {
       defaultTheme="light"
       disableTransitionOnChange
     >
-      <CheckoutSuccessHandler />
+      <Suspense fallback={null}>
+        <CheckoutSuccessHandler />
+      </Suspense>
       <div className="h-[calc(100vh-0px)] flex">
         <SidebarComponent
           onToggleCollapse={toggleSidebar}
