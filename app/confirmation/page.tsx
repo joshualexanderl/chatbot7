@@ -1,10 +1,10 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { useState, Suspense } from "react";
 import { createSupabaseClient } from "@/utils/supabase/client";
 
-export default function EmailConfirmation() {
+function EmailConfirmationContent() {
   const searchParams = useSearchParams();
   const email = searchParams.get("email") || "";
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -61,5 +61,21 @@ export default function EmailConfirmation() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function EmailConfirmation() {
+  return (
+    <Suspense fallback={
+      <div className="h-screen w-full flex items-center justify-center bg-white">
+        <div className="w-full max-w-md px-6 mx-auto -mt-16">
+          <div className="text-center mb-8">
+            <h1 className="text-[32px] font-normal tracking-tight">Loading...</h1>
+          </div>
+        </div>
+      </div>
+    }>
+      <EmailConfirmationContent />
+    </Suspense>
   );
 } 
