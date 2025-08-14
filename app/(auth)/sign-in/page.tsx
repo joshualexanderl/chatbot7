@@ -4,11 +4,11 @@ import { signInAction } from "@/app/actions";
 import { Input } from "@/components/ui/input";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { Eye, AlertCircle } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 
-export default function SignIn() {
+function SignInContent() {
   const [showPassword, setShowPassword] = useState(false);
   const [showPasswordText, setShowPasswordText] = useState(false);
   const [email, setEmail] = useState("");
@@ -115,6 +115,7 @@ export default function SignIn() {
                       type="button"
                       onClick={() => setShowPasswordText(!showPasswordText)}
                       className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                      aria-label={showPasswordText ? "Hide password" : "Show password"}
                     >
                       <Eye size={20} />
                     </button>
@@ -163,5 +164,24 @@ export default function SignIn() {
         </div>
       </div>
     </>
+  );
+}
+
+export default function SignIn() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen w-full grid place-items-center relative bg-white">
+        <div className="absolute top-4 left-4 pl-2">
+          <span className="font-bold text-2xl text-zinc-900 cursor-default">start</span>
+        </div>
+        <div className="w-full px-4 sm:px-0 sm:max-w-[400px] -mt-16">
+          <div className="text-center">
+            <h1 className="text-[32px] font-normal tracking-tight">Loading...</h1>
+          </div>
+        </div>
+      </div>
+    }>
+      <SignInContent />
+    </Suspense>
   );
 }
